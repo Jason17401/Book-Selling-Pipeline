@@ -1,0 +1,12 @@
+zxing-cpp>=2.2                 # main barcode reader
+opencv-python-headless>=4.8    # finds tilted/small barcodes so they can be straightened; also a backup reader
+pillow>=10.1
+pillow-heif>=0.16              # iPhone HEIC photos
+requests>=2.31
+beautifulsoup4>=4.12           # reading books.com.tw / NCL pages
+tzdata                         # Windows: lets the Google quota counter know US Pacific midnight
+python-telegram-bot>=21.0
+PyQt6>=6.5                     # the review window
+# Optional third reader (often reads blurry/glary barcodes the others miss). On Windows it may also need the
+# "Microsoft Visual C++ Redistributable"; if it fails to load it is simply skipped.
+# pyzbar>=0.1.9

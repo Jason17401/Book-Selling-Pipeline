@@ -1,0 +1,103 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="640" viewBox="0 0 1200 640" font-family="Segoe UI, Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#475569"/>
+    </marker>
+    <style>
+      .lane { font-size: 15px; font-weight: 700; fill: #334155; letter-spacing: .04em; }
+      .title { font-size: 17px; font-weight: 700; fill: #0f172a; }
+      .body { font-size: 13.5px; fill: #334155; }
+      .small { font-size: 12.5px; fill: #64748b; }
+      .step { font-size: 13px; font-weight: 700; fill: #ffffff; }
+      .flow { stroke: #475569; stroke-width: 2; fill: none; marker-end: url(#arrow); }
+    </style>
+  </defs>
+  <rect width="1200" height="640" fill="#ffffff"/>
+  <text x="40" y="44" font-size="24" font-weight="700" fill="#0f172a">Book Selling Pipeline</text>
+  <text x="40" y="68" class="small">From a pile of books to finished listings - what happens where</text>
+
+  <!-- lanes -->
+  <rect x="30" y="90" width="1140" height="150" rx="14" fill="#eff6ff" stroke="#bfdbfe"/>
+  <text x="1150" y="116" class="lane" text-anchor="end">ON YOUR PHONE</text>
+  <rect x="30" y="256" width="1140" height="190" rx="14" fill="#f0fdf4" stroke="#bbf7d0"/>
+  <text x="1150" y="282" class="lane" text-anchor="end">ON THE COMPUTER - AUTOMATIC (after /process)</text>
+  <rect x="30" y="462" width="1140" height="150" rx="14" fill="#fff7ed" stroke="#fed7aa"/>
+  <text x="1150" y="488" class="lane" text-anchor="end">ON THE COMPUTER - YOU</text>
+
+  <!-- phone lane -->
+  <g>
+    <rect x="60" y="130" width="320" height="94" rx="10" fill="#ffffff" stroke="#93c5fd"/>
+    <circle cx="84" cy="154" r="13" fill="#2563eb"/><text x="84" y="159" class="step" text-anchor="middle">1</text>
+    <text x="106" y="160" class="title">Photograph a set</text>
+    <text x="78" y="186" class="body">1 photo of all front covers (2 x 5 grid)</text>
+    <text x="78" y="206" class="body">+ 1 barcode photo per book, in order</text>
+  </g>
+  <g>
+    <rect x="440" y="130" width="320" height="94" rx="10" fill="#ffffff" stroke="#93c5fd"/>
+    <circle cx="464" cy="154" r="13" fill="#2563eb"/><text x="464" y="159" class="step" text-anchor="middle">2</text>
+    <text x="486" y="160" class="title">Send to the Telegram bot</text>
+    <text x="458" y="186" class="body">front photo first, then the 10 barcodes</text>
+    <text x="458" y="206" class="body">bot replies "Set 1: barcode 4/10 saved"</text>
+  </g>
+  <g>
+    <rect x="820" y="130" width="320" height="94" rx="10" fill="#ffffff" stroke="#93c5fd"/>
+    <circle cx="844" cy="154" r="13" fill="#2563eb"/><text x="844" y="159" class="step" text-anchor="middle">3</text>
+    <text x="866" y="160" class="title">Send /process</text>
+    <text x="838" y="186" class="body">live progress bar in the chat</text>
+    <text x="838" y="206" class="body">"NEEDS MANUAL" message per problem book</text>
+  </g>
+  <path class="flow" d="M380,177 L436,177"/>
+  <path class="flow" d="M760,177 L816,177"/>
+
+  <!-- automatic lane -->
+  <g>
+    <rect x="60" y="296" width="250" height="132" rx="10" fill="#ffffff" stroke="#86efac"/>
+    <text x="78" y="324" class="title">Read barcodes</text>
+    <text x="78" y="350" class="body">photo -> ISBN</text>
+    <text x="78" y="372" class="body">split photos into sets</text>
+    <text x="78" y="394" class="body">by counting (1 + 10)</text>
+  </g>
+  <g>
+    <rect x="345" y="296" width="250" height="132" rx="10" fill="#ffffff" stroke="#86efac"/>
+    <text x="363" y="324" class="title">Book details</text>
+    <text x="363" y="350" class="body">title, author, publisher, year</text>
+    <text x="363" y="372" class="body">eslite, books.com.tw, Google,</text>
+    <text x="363" y="394" class="body">NCL, Open Library</text>
+  </g>
+  <g>
+    <rect x="630" y="296" width="250" height="132" rx="10" fill="#ffffff" stroke="#86efac"/>
+    <text x="648" y="324" class="title">Market price</text>
+    <text x="648" y="350" class="body">list price of a NEW copy</text>
+    <text x="648" y="372" class="body">shops -> NCL -> web search</text>
+    <text x="648" y="394" class="body">your price = 40% of it</text>
+  </g>
+  <g>
+    <rect x="915" y="296" width="225" height="132" rx="10" fill="#0f172a"/>
+    <text x="933" y="324" class="title" fill="#ffffff" style="fill:#ffffff">data\books.csv</text>
+    <text x="933" y="350" class="body" style="fill:#cbd5e1">one row per book</text>
+    <text x="933" y="372" class="body" style="fill:#cbd5e1">+ review sheet photo</text>
+    <text x="933" y="394" class="body" style="fill:#cbd5e1">status: ready / to fix</text>
+  </g>
+  <path class="flow" d="M310,362 L341,362"/>
+  <path class="flow" d="M595,362 L626,362"/>
+  <path class="flow" d="M880,362 L911,362"/>
+  <path class="flow" d="M980,224 C980,250 185,250 185,292"/>
+
+  <!-- you lane -->
+  <g>
+    <rect x="60" y="502" width="520" height="94" rx="10" fill="#ffffff" stroke="#fdba74"/>
+    <circle cx="84" cy="526" r="13" fill="#ea580c"/><text x="84" y="531" class="step" text-anchor="middle">4</text>
+    <text x="106" y="532" class="title">Review window (review.bat)</text>
+    <text x="78" y="558" class="body">red books need something: type a missing ISBN, price or</text>
+    <text x="78" y="578" class="body">condition, check other-edition prices - Save turns them green</text>
+  </g>
+  <g>
+    <rect x="640" y="502" width="500" height="94" rx="10" fill="#ffffff" stroke="#fdba74"/>
+    <circle cx="664" cy="526" r="13" fill="#ea580c"/><text x="664" y="531" class="step" text-anchor="middle">5</text>
+    <text x="686" y="532" class="title">Make listings</text>
+    <text x="658" y="558" class="body">per finished set: numbered front photo +</text>
+    <text x="658" y="578" class="body">listing.txt (every book, condition, price)</text>
+  </g>
+  <path class="flow" d="M1027,428 C1027,462 320,452 320,498"/>
+  <path class="flow" d="M580,549 L636,549"/>
+</svg>
