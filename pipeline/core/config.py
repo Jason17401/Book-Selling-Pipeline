@@ -42,8 +42,8 @@ class Config:
     isbndb_base: str = "https://api2.isbndb.com"
     contact_email: str = "you@example.com"
     providers: tuple = ("openlibrary", "openlibrary_search", "google", "isbndb")
-    providers_tw: tuple = ("eslite", "books_tw", "google", "ncl", "openlibrary")  # used for Taiwanese ISBNs (957/986/626)
-    stop_when: tuple = ("title", "author", "publisher", "year")  # stop asking more providers once these are filled
+    providers_tw: tuple = ("google", "ncl", "eslite", "books_tw", "openlibrary")  # used for Taiwanese ISBNs (957/986/626)
+    stop_when: tuple = ("title", "author", "publisher", "year", "genre")  # stop asking more providers once these are filled
     cache_days: int = 180          # remember what a provider returned for an ISBN (saves your Google quota)
     cache_miss_days: int = 7       # remember "not found" for this long, then ask again
     google_daily_limit: int = 950  # stop calling Google Books after this many calls per (Pacific-time) day
@@ -60,7 +60,7 @@ class Config:
     default_currency: str = "TWD"  # used when a price is given without a currency
     default_condition: str = "like_new"  # condition of a new book unless a caption says otherwise ("" = none)
     # market price of a NEW copy and your price from it (see pipeline/sources/market.py)
-    market_providers: tuple = ("eslite", "books_tw", "ncl", "barcode")
+    market_providers: tuple = ("barcode", "ncl", "eslite", "books_tw")
     market_search: tuple = ("isbn", "isbn10", "title", "web")
     web_search: str = ""           # tavily | langsearch: find shop pages with a web search API when the shop's search fails
     tavily_api_key: str = ""
@@ -68,7 +68,6 @@ class Config:
     web_search_monthly_limit: int = 900
     web_queries: tuple = ("site", "shop")   # "9789574760190 site:eslite.com", then "eslite 9789574760190"
     market_similar: bool = True    # no copy with this ISBN anywhere: use another edition (same title + author)
-    market_ebook: bool = True      # no printed copy with this ISBN: use the e-book with the same ISBN
     market_title_pages: int = 3    # books.com.tw: product pages checked per title search
     auto_price: bool = True        # fill an EMPTY price from the market price
     price_ratio: float = 0.4       # your price = market price x this
@@ -127,8 +126,8 @@ class Config:
             isbndb_base=e("ISBNDB_BASE_URL", "https://api2.isbndb.com"),
             contact_email=e("CONTACT_EMAIL", "you@example.com"),
             providers=_csv(e("BOOK_PROVIDERS", "openlibrary,openlibrary_search,google,isbndb")),
-            providers_tw=_csv(e("BOOK_PROVIDERS_TW", "eslite,books_tw,google,ncl,openlibrary")),
-            stop_when=_csv(e("LOOKUP_STOP_WHEN", "title,author,publisher,year")),
+            providers_tw=_csv(e("BOOK_PROVIDERS_TW", "google,ncl,eslite,books_tw,openlibrary")),
+            stop_when=_csv(e("LOOKUP_STOP_WHEN", "title,author,publisher,year,genre")),
             cache_days=int(e("LOOKUP_CACHE_DAYS", "180") or 0),
             cache_miss_days=int(e("LOOKUP_CACHE_MISS_DAYS", "7") or 0),
             google_daily_limit=int(e("GOOGLE_DAILY_LIMIT", "950") or 0),
@@ -144,7 +143,7 @@ class Config:
             rotate=rotate,
             default_currency=(e("DEFAULT_CURRENCY", "TWD").strip().upper() or "TWD"),
             default_condition=e("DEFAULT_CONDITION", "like_new").strip().lower(),
-            market_providers=_csv(e("MARKET_PROVIDERS", "eslite,books_tw,ncl,barcode")),
+            market_providers=_csv(e("MARKET_PROVIDERS", "barcode,ncl,eslite,books_tw")),
             market_search=_csv(e("MARKET_SEARCH", "isbn,isbn10,title,web")),
             web_search=e("WEB_SEARCH", "").strip().lower(),
             tavily_api_key=e("TAVILY_API_KEY", "").strip(),
@@ -153,7 +152,6 @@ class Config:
             web_queries=tuple(q for q in _csv(e("WEB_QUERIES", "site,shop")) if q in ("site", "shop")) or ("site",),
             market_title_pages=int(e("MARKET_TITLE_PAGES", "3") or 3),
             market_similar=e("MARKET_SIMILAR", "1").strip().lower() not in ("0", "no", "false", "off"),
-            market_ebook=e("MARKET_EBOOK", "1").strip().lower() not in ("0", "no", "false", "off"),
             auto_price=e("AUTO_PRICE", "1").strip().lower() in ("1", "yes", "true", "on"),
             price_ratio=_ratio(e("PRICE_RATIO", "0.4")),
             price_round=e("PRICE_ROUND", "TWD:1,*:0.5").strip(),
@@ -167,8 +165,10 @@ class Config:
         unknown = [p for p in cfg.providers + cfg.providers_tw if p not in ALL_PROVIDERS]
         if unknown:
             raise SystemExit(f"Unknown book provider(s) in .env: {', '.join(unknown)}. Known: {', '.join(ALL_PROVIDERS)}")
-        if cfg.default_condition and cfg.default_condition not in ("new", "like_new", "good", "acceptable", "poor"):
-            raise SystemExit("DEFAULT_CONDITION must be one of new, like_new, good, acceptable, poor (or blank)")
+        from .validate import CONDITIONS, OLD_CONDITIONS
+        cfg.default_condition = OLD_CONDITIONS.get(cfg.default_condition, cfg.default_condition)
+        if cfg.default_condition and cfg.default_condition not in CONDITIONS:
+            raise SystemExit(f"DEFAULT_CONDITION must be one of {', '.join(CONDITIONS)} (or blank)")
         bad_m = [m for m in cfg.market_providers if m not in ("barcode", "eslite", "books_tw", "ncl")]
         if bad_m:
             raise SystemExit(f"MARKET_PROVIDERS: unknown {', '.join(bad_m)}. Use any of: barcode, eslite, books_tw, ncl")

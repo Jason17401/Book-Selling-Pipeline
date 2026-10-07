@@ -60,7 +60,8 @@ HELP = (
     "ticked in book order (Telegram keeps the order inside one album of up to 10). Never select more than 10 at once.\n\n"
     "Normal Photos are fine for barcode photos. Files over 20 MB cannot be received by bots.\n"
     "Captions (all optional): 'retake' = replaces the previous barcode photo; 'front' = starts a new set early (short "
-    "set); 'good 5' or 'good 150 TWD' on the front photo = condition/price for the whole set.\n\n"
+    "set); '良好 150' (or 'good 150') on the front photo = condition/price for the whole set (grades: 全新 近全新 "
+    "良好 普通 差強人意).\n\n"
     "/undo - remove the last photo\n/status - where am I\n/process - ingest everything sent so far\n"
     "/todo - which books still need fixing"
 )

@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Callable
 
 COLUMNS = [
-    "sku", "batch", "set_id", "position", "isbn13", "title", "author", "publisher", "year", "pages",
+    "sku", "batch", "set_id", "position", "isbn13", "title", "author", "publisher", "year", "pages", "genre",
     "condition", "price", "currency", "price_basis",
     "market_price", "market_currency", "market_source", "market_url", "market_match", "market_isbn", "barcode_addon", "front_photo", "barcode_photo",
     "status", "errors", "source", "created_at", "trademe_id", "ebay_id", "fb_status", "notes",
@@ -90,6 +90,8 @@ def _upgrade(r: dict) -> dict:
         r["price"], r["currency"] = r["price_nzd"], r.get("currency") or "NZD"
     if not r.get("barcode_photo") and r.get("back_crop"):
         r["barcode_photo"] = r["back_crop"]
+    if r.get("condition") == "acceptable":       # renamed to the Taiwanese grade 普通 = fair
+        r["condition"] = "fair"
     return r
 
 

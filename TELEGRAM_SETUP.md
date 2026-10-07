@@ -13,7 +13,7 @@ Telegram on your phone. The steps below use the phone and the computer side by s
 1. In Telegram, search for **@BotFather** (the official one has a blue tick) and open the chat.
 2. Send `/newbot`.
 3. It asks for a **name** - anything, e.g. `My Book Pipeline`.
-4. It asks for a **username** - must be unique and end in `bot`, e.g. `my_books_bot`.
+4. It asks for a **username** - must be unique and end in `bot`, e.g. `jason_books_bot`.
 5. BotFather replies with a **token** that looks like `7412345678:AAH3k...`. Keep this message open for step 2.
 
 The token is the password to your bot: anyone who has it can control the bot. Don't share it or post it anywhere.

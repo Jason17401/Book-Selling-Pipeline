@@ -17,7 +17,7 @@ from ..core.config import Config
 from ..core.isbn import normalize
 from ..core.validate import CONDITIONS, DONE, refresh_status, row_issues  # noqa: F401
 
-EDITABLE = ("isbn13", "title", "author", "publisher", "year", "pages", "condition", "price", "currency",
+EDITABLE = ("isbn13", "title", "author", "publisher", "year", "pages", "genre", "condition", "price", "currency",
             "market_price", "market_currency", "market_source", "market_url", "market_match", "market_isbn", "notes",
             "price_basis")
 
@@ -32,8 +32,11 @@ def public(r: dict, cfg: Config) -> dict:
         pics.append({"label": "Barcode photo", "path": r["barcode_photo"], "pos": 0})
     if r.get("front_photo"):
         pics.append({"label": "Whole set", "path": r["front_photo"], "pos": 0})
+    done = r.get("status") in DONE
+    to_check = not issues and not done and r.get("status") != "validated"
     return {**{k: r.get(k, "") for k in store.COLUMNS}, "issues": issues, "photos": pics,
-            "attention": bool(issues) and r.get("status") not in DONE}
+            "to_check": to_check,                       # complete, but you have not confirmed it yet
+            "attention": not done and (bool(issues) or to_check)}
 
 
 # ---- actions (also used by tests) -------------------------------------------------------------
@@ -44,15 +47,22 @@ def list_rows(cfg: Config, only_attention: bool = True) -> list:
 
 def todo_text(cfg: Config, limit: int = 0) -> str:
     rows = list_rows(cfg)
+    fix = [r for r in rows if r["issues"]]
+    check = [r for r in rows if r["to_check"]]
     if not rows:
-        return "Nothing to fix - every book is complete."
-    lines = [f"{len(rows)} book(s) need attention:"]
-    for r in rows[: limit or None]:
-        where = f"{r['set_id']} #{r['position']}" if r["set_id"] else r["sku"]
-        lines.append(f"  {where}  {r['title'] or r['isbn13'] or '(unknown book)'}: " + "; ".join(i["msg"].split(":")[0] for i in r["issues"]))
-    if limit and len(rows) > limit:
-        lines.append(f"  ... and {len(rows) - limit} more")
-    lines.append("Fix them on the computer: double-click review.bat (or run: python -m pipeline review)")
+        return "Nothing to do - every book is checked."
+    lines = []
+    if fix:
+        lines.append(f"{len(fix)} book(s) need fixing:")
+        for r in fix[: limit or None]:
+            where = f"{r['set_id']} #{r['position']}" if r["set_id"] else r["sku"]
+            lines.append(f"  {where}  {r['title'] or r['isbn13'] or '(unknown book)'}: "
+                         + "; ".join(i["msg"].split(":")[0] for i in r["issues"]))
+        if limit and len(fix) > limit:
+            lines.append(f"  ... and {len(fix) - limit} more")
+    if check:
+        lines.append(f"{len(check)} book(s) are complete and just need a quick check.")
+    lines.append("On the computer: double-click review.bat (or run: python -m pipeline review)")
     return "\n".join(lines)
 
 
@@ -87,7 +97,7 @@ def save_row(cfg: Config, sku: str, fields: dict) -> dict:
             r["currency"] = cfg.default_currency
         if changed and "manual" not in (r.get("source") or ""):
             r["source"] = "+".join(x for x in (r.get("source"), "manual") if x)
-        refresh_status(r, cfg)
+        refresh_status(r, cfg, confirm=True)      # saving in the review window = you checked it
         return r
     return public(store.update_rows(cfg.csv_path, change), cfg)
 

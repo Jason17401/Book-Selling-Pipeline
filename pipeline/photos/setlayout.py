@@ -12,7 +12,7 @@ Captions (Telegram caption, or a .txt next to the photo with the same name) over
   front / set    this photo is the front photo of a new set (lets you shoot a short set, e.g. 7 books)
   back           this photo is a book's back, never a front
   retake / again this photo replaces the previous back photo (use it right after a bad shot)
-  good 5         condition and price (both optional; add a currency like 'good 150 TWD', default DEFAULT_CURRENCY);
+  良好 150       condition and price (both optional; 'good 150 NZD' works too, default currency DEFAULT_CURRENCY);
                  on the front photo it applies to the whole set, on a barcode photo to that book
 """
 from __future__ import annotations
@@ -271,7 +271,7 @@ def process_sets(cfg: Config, decode: Callable = None, lookup: Callable = lookup
                 "sku": f"{s.batch}-{set_id}-{pos:02d}", "batch": s.batch, "set_id": set_id, "position": pos,
                 "isbn13": book.isbn,
                 "barcode_addon": decode_addons.get(book.isbn, "") if book.isbn else "",
-                **{k: meta.get(k, "") for k in ("title", "author", "publisher", "year", "pages")},
+                **{k: meta.get(k, "") for k in ("title", "author", "publisher", "year", "pages", "genre")},
                 "condition": b_cond or cfg.default_condition, "price": b_price, "currency": b_cur, "price_basis": "caption" if b_price else "",
                 "front_photo": str(front_path) if front_path else "",
                 "barcode_photo": str(placed[-1]),          # after a retake, the newest photo is the one that counts

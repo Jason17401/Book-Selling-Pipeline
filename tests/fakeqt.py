@@ -172,6 +172,15 @@ class QComboBox(QWidget):
     def findData(self, d):
         return next((i for i, (_, x) in enumerate(self._items) if x == d), -1)
 
+    def count(self):
+        return len(self._items)
+
+    def setItemData(self, i, value, role=None):
+        pass
+
+    def itemText(self, i):
+        return self._items[i][0]
+
     def setCurrentIndex(self, i):
         self._i = i
 

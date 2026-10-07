@@ -60,15 +60,15 @@
   <g>
     <rect x="345" y="296" width="250" height="132" rx="10" fill="#ffffff" stroke="#86efac"/>
     <text x="363" y="324" class="title">Book details</text>
-    <text x="363" y="350" class="body">title, author, publisher, year</text>
-    <text x="363" y="372" class="body">eslite, books.com.tw, Google,</text>
-    <text x="363" y="394" class="body">NCL, Open Library</text>
+    <text x="363" y="350" class="body">title, author, year, genre</text>
+    <text x="363" y="372" class="body">Google, NCL, eslite,</text>
+    <text x="363" y="394" class="body">books.com.tw, Open Library</text>
   </g>
   <g>
     <rect x="630" y="296" width="250" height="132" rx="10" fill="#ffffff" stroke="#86efac"/>
     <text x="648" y="324" class="title">Market price</text>
     <text x="648" y="350" class="body">list price of a NEW copy</text>
-    <text x="648" y="372" class="body">shops -> NCL -> web search</text>
+    <text x="648" y="372" class="body">price barcode -> NCL -> shops</text>
     <text x="648" y="394" class="body">your price = 40% of it</text>
   </g>
   <g>
@@ -76,7 +76,7 @@
     <text x="933" y="324" class="title" fill="#ffffff" style="fill:#ffffff">data\books.csv</text>
     <text x="933" y="350" class="body" style="fill:#cbd5e1">one row per book</text>
     <text x="933" y="372" class="body" style="fill:#cbd5e1">+ review sheet photo</text>
-    <text x="933" y="394" class="body" style="fill:#cbd5e1">status: ready / to fix</text>
+    <text x="933" y="394" class="body" style="fill:#cbd5e1">status: to fix / to check</text>
   </g>
   <path class="flow" d="M310,362 L341,362"/>
   <path class="flow" d="M595,362 L626,362"/>
@@ -88,8 +88,8 @@
     <rect x="60" y="502" width="520" height="94" rx="10" fill="#ffffff" stroke="#fdba74"/>
     <circle cx="84" cy="526" r="13" fill="#ea580c"/><text x="84" y="531" class="step" text-anchor="middle">4</text>
     <text x="106" y="532" class="title">Review window (review.bat)</text>
-    <text x="78" y="558" class="body">red books need something: type a missing ISBN, price or</text>
-    <text x="78" y="578" class="body">condition, check other-edition prices - Save turns them green</text>
+    <text x="78" y="558" class="body">red = fill in what is missing; amber = quick check</text>
+    <text x="78" y="578" class="body">of a complete book - Save turns them green</text>
   </g>
   <g>
     <rect x="640" y="502" width="500" height="94" rx="10" fill="#ffffff" stroke="#fdba74"/>

@@ -5,7 +5,10 @@ Status of a book (column `status` in books.csv):
   enriched      The book is identified (ISBN + title + author) but something else is missing or wrong: no price yet
                 (no market price was found to work it out from), no condition, an invalid price / condition /
                 currency, or a photo file is missing.
-  validated     Complete: ready to go into a listing (export-sets / "Make listings").
+  to_check      Nothing is missing, but nobody has looked at it yet: every newly processed book with complete data
+                lands here. Open it in the review window, glance at the fields and press Save (or Ctrl+Enter) -
+                that confirms it.
+  validated     Complete AND confirmed by you: ready to go into a listing (export-sets / "Make listings").
   listed        You posted it (set this yourself). The pipeline never changes listed / sold books.
   sold          Sold (set this yourself).
 Condition and price are REQUIRED (new books get DEFAULT_CONDITION, normally like_new, and a price worked out from the
@@ -19,8 +22,25 @@ from pathlib import Path
 from .config import Config
 from .isbn import isbn13_valid
 
-CONDITIONS = {"new", "like_new", "good", "acceptable", "poor"}
+# Book condition grades - TAAZE 讀冊生活's five used-book grades (全新 / 近全新 / 良好 / 普通 / 差強人意), the scale
+# Taiwanese used-book buyers know best. (code, Chinese name, English name, what it means)
+CONDITION_GRADES = [
+    ("new", "全新", "New", "Unread. No marks, wear or yellowing; looks as it did in the shop."),
+    ("like_new", "近全新", "Like new", "Read carefully once or twice. No writing or highlighting; at most tiny shelf "
+                                        "wear on edges or corners."),
+    ("good", "良好", "Good", "Clearly read, but clean and complete: light wear on cover/corners or slight yellowing; "
+                             "no or very little writing."),
+    ("fair", "普通", "Fair", "Obvious wear: creases, yellowing, foxing (書斑), some writing or highlighting, a name "
+                             "on the first page. All pages present and readable."),
+    ("poor", "差強人意", "Poor", "Heavy wear: lots of writing, water marks, loose or damaged pages or cover. Readable "
+                                 "but priced as such."),
+]
+CONDITIONS = [c[0] for c in CONDITION_GRADES]             # best first
+CONDITION_ZH = {c[0]: c[1] for c in CONDITION_GRADES}
+CONDITION_EN = {c[0]: c[2] for c in CONDITION_GRADES}
+OLD_CONDITIONS = {"acceptable": "fair"}                   # names used by older versions
 DONE = ("listed", "sold")
+STATUSES = ("needs_manual", "enriched", "to_check", "validated", "listed", "sold")
 
 
 def photos_of(row: dict) -> list:
@@ -39,11 +59,11 @@ def row_issues(r: dict, cfg: Config) -> list:
         if not (r.get(f) or "").strip():
             hint = " - press 'Look up' to fetch it" if isbn and isbn13_valid(isbn) else ""
             out.append({"field": f, "msg": f"{name} missing{hint}"})
-    cond = (r.get("condition") or "").strip()
+    cond = OLD_CONDITIONS.get((r.get("condition") or "").strip(), (r.get("condition") or "").strip())
     if not cond:
-        out.append({"field": "condition", "msg": "Condition missing: pick one (like_new if nothing is wrong with it)"})
+        out.append({"field": "condition", "msg": "Condition missing: pick one (近全新 like_new if nothing is wrong with it)"})
     elif cond not in CONDITIONS:
-        out.append({"field": "condition", "msg": f"Condition '{cond}' is not one of: {', '.join(sorted(CONDITIONS))}"})
+        out.append({"field": "condition", "msg": f"Condition '{cond}' is not one of: {', '.join(CONDITIONS)}"})
     price = (r.get("price") or "").strip()
     if not price:
         why = ("no market price was found to work it out from" if not (r.get("market_price") or "").strip()
@@ -75,14 +95,19 @@ def row_issues(r: dict, cfg: Config) -> list:
     return out
 
 
-def refresh_status(r: dict, cfg: Config) -> list:
-    """Set status/errors from the row's content (never touches listed/sold). Returns the issues."""
+def refresh_status(r: dict, cfg: Config, confirm: bool = False) -> list:
+    """Set status/errors from the row's content (never touches listed/sold). Returns the issues.
+    Complete data becomes 'to_check'; only confirm=True (you saved it in the review window) makes it 'validated'.
+    A book you already confirmed stays validated as long as nothing is missing."""
+    if r.get("condition") in OLD_CONDITIONS:
+        r["condition"] = OLD_CONDITIONS[r["condition"]]
     issues = row_issues(r, cfg)
     if r.get("status") in DONE:
         return issues
     identified = isbn13_valid((r.get("isbn13") or "").strip()) and r.get("title") and r.get("author")
     if not issues:
-        r["status"], r["errors"] = "validated", ""
+        r["status"] = "validated" if confirm or r.get("status") == "validated" else "to_check"
+        r["errors"] = ""
     else:
         r["status"] = "enriched" if identified else "needs_manual"
         r["errors"] = "; ".join(sorted({i["field"] or "photo" for i in issues}))
@@ -90,12 +115,12 @@ def refresh_status(r: dict, cfg: Config) -> list:
 
 
 def validate_rows(rows: list, cfg: Config) -> dict:
-    """Re-check every book that is not listed/sold and set its status."""
-    counts = {"validated": 0, "failed": 0}
+    """Re-check every book that is not listed/sold and set its status. Returns how many books are in each status."""
+    counts = {s: 0 for s in STATUSES}
     for r in rows:
-        if r.get("status") in DONE:
-            continue
-        counts["failed" if refresh_status(r, cfg) else "validated"] += 1
+        if r.get("status") not in DONE:
+            refresh_status(r, cfg)
+        counts[r.get("status") or "needs_manual"] = counts.get(r.get("status") or "needs_manual", 0) + 1
     return counts
 
 
@@ -106,7 +131,7 @@ def find_warnings(rows: list) -> list:
         if r["sku"] in skus:
             warns.append(f"duplicate sku {r['sku']}")
         skus.add(r["sku"])
-        if r.get("status") in ("enriched", "validated", "listed") and r.get("isbn13"):
+        if r.get("status") in ("enriched", "to_check", "validated", "listed") and r.get("isbn13"):
             isbns.setdefault(r["isbn13"], []).append(r["sku"])
     for isbn, s in isbns.items():
         if len(s) > 1:

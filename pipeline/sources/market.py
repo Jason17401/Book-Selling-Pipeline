@@ -1,19 +1,18 @@
 """Market price of a NEW copy (定價, the publisher's list price) from Taiwanese bookshops, and your price from it.
 
-Why not just search the ISBN?  Both shops' search boxes often answer "no results" for an ISBN even when they sell the
-book (they index titles better than ISBNs). So for each shop we try, in order (MARKET_SEARCH):
-    isbn    the 13-digit ISBN
-    isbn10  the old 10-digit form (worked out automatically)
-    title   the book's title (found earlier by the metadata providers), main part only
-and we ONLY accept a product whose own ISBN equals ours - a title search can return other editions, the e-book, or a
-different book with a similar name, and those prices would be wrong. E-books are skipped.
+The order (first EXACT answer wins - see Hunt and apply_market):
+    1. barcode   the small price barcode printed next to the ISBN barcode, read from your photo (free, offline)
+    2. ncl       國家圖書館 全國新書資訊網: the price the publisher registered with the ISBN
+    3. eslite / books_tw: the shops' own search for the ISBN (13 and 10 digits)
+    4. web search for the ISBN (Tavily / LangSearch, if you have a key)
+    5. the shops' search for the TITLE: our ISBN, else the same book in another edition (physical copies only)
+    6. one web search for title + author
+Only PRINTED books are ever used: e-books (電子書) and audiobooks (有聲書) are skipped everywhere.
 
-Shops (MARKET_PROVIDERS, first one that finds the book wins):
   eslite    GET https://athena.eslite.com/api/v2/search?q=<isbn or title>&size=20&start=0
             each hit carries isbn / isbn10 / ean, mprice (定價) and final_price (sale price)
   books_tw  GET https://search.books.com.tw/search/query/key/<isbn or title>/cat/all   -> product ids
             GET https://www.books.com.tw/products/<id>   -> ISBN：..., 定價：300元, 優惠價：79折237元
-  ncl       國家圖書館 ISBN record (the price the publisher registered), last resort
 
 Your price = market price x PRICE_RATIO (default 0.4), in the market price's own currency (TWD for these shops - no
 currency conversion), rounded to PRICE_ROUND. Books with no market price keep whatever price you give them
@@ -35,7 +34,7 @@ from ..core.isbn import normalize
 
 log = logging.getLogger("pipeline.market")
 MARKET_FIELDS = ("market_price", "market_currency", "market_source", "market_url", "market_match", "market_isbn")
-VERSION = 8   # bump to ignore old cached answers
+VERSION = 9   # bump to ignore old cached answers
 
 
 def _main_title(title: str) -> str:
@@ -62,20 +61,18 @@ def describe(cfg: Config) -> str:
     shops = [s for s in cfg.market_providers if s in ("eslite", "books_tw")]
     web = websearch.enabled(cfg)
     steps = []
-    if shops:
-        steps.append(f"ISBN on {', '.join(shops)}")
-    if "ncl" in cfg.market_providers:
-        steps.append("ncl")
-    if web and shops:
-        steps.append("web search (ISBN)")
-    if cfg.market_ebook:
-        steps.append("e-book with same ISBN")
-    if "title" in cfg.market_search and shops:
-        steps.append(f"title on {', '.join(shops)}" + (" (+ other editions)" if cfg.market_similar else ""))
-    if web and shops and cfg.market_similar and "title" in cfg.market_search:
-        steps.append("web search (title)")
     if "barcode" in cfg.market_providers:
         steps.append("price barcode")
+    if "ncl" in cfg.market_providers:
+        steps.append("ncl")
+    if shops:
+        steps.append(f"ISBN on {', '.join(shops)}")
+    if web and shops:
+        steps.append("web search (ISBN)")
+    if "title" in cfg.market_search and shops:
+        steps.append(f"title on {', '.join(shops)}" + (" (+ other printed editions)" if cfg.market_similar else ""))
+    if web and shops and cfg.market_similar and "title" in cfg.market_search:
+        steps.append("web search (title)")
     return f"Market prices: {' -> '.join(steps)}; {websearch.describe(cfg)}"
 
 
@@ -214,19 +211,30 @@ def same_book(our_title: str, our_author: str, their_title: str, their_author: s
     return min(len("".join(title_parts(our_title))), len("".join(title_parts(their_title)))) >= 4
 
 
+NOT_PRINTED = re.compile(r"電子書|有聲書|e-?book|audio ?book|audible|kindle|epub|\bCD\b|朗讀", re.I)
+
+
+def is_printed(title: str = "", product_type: str = "", ebook_flag=False, product_id: str = "") -> bool:
+    """False for e-books and audiobooks: books.com.tw ids starting with E, eslite is_ebook / product_type, or words like
+    電子書 / 有聲書 in the title. Only printed books' prices are ever used."""
+    if ebook_flag or str(product_id).startswith("E"):
+        return False
+    if product_type and str(product_type).lower() not in ("book", "books", "書籍", "圖書"):
+        return False
+    return not NOT_PRINTED.search(title or "")
+
+
 class Hunt:
-    """One book's market price search. Order (cheapest and most exact first):
-        1. each shop's own search box: ISBN, then the 10-digit ISBN                    exact
-        2. NCL, Taiwan's ISBN agency                                                   exact
-        3. web search for the ISBN (one search per query form, see websearch.py)       exact
-        4. an e-book with OUR ISBN met on the way (only its price is known)            ebook
-        5. each shop's own search box: the TITLE - our ISBN, else the same title + author in another edition
-        6. web search for the title + author (one search for both shops)              exact or similar
-    The first exact answer wins; the e-book and the other edition are only fallbacks."""
+    """One book's market price search after the price barcode (that one is in apply_market). Order:
+        1. NCL, Taiwan's ISBN agency: the price the publisher registered                 exact
+        2. each shop's own search box: ISBN, then the 10-digit ISBN                      exact
+        3. web search for the ISBN (one search per query form, see websearch.py)         exact
+        4. each shop's own search box: the TITLE - our ISBN, else the same title + author in another PRINTED edition
+        5. web search for the title + author (one search for both shops)                exact or similar
+    The first exact answer wins; another edition is only the last fallback. E-books and audiobooks never count."""
 
     def __init__(self, isbn: str, title: str, author: str, cfg: Config):
         self.isbn, self.title, self.author, self.cfg = isbn, title or "", author or "", cfg
-        self.ebook: dict = {}
         self.candidates: list = []    # other editions found on the way (best one used, see similar)
         self.opened: set = set()      # product ids already looked at (never opened twice)
         self.errors: list = []
@@ -236,11 +244,6 @@ class Hunt:
     def found(price, source, url, match="exact", other_isbn="", year="") -> dict:
         return {"market_price": price, "market_currency": "TWD", "market_source": source, "market_url": url,
                 "market_match": match, "market_isbn": other_isbn, "_year": year}
-
-    def offer_ebook(self, price, shop, url):
-        if price and not self.ebook and self.cfg.market_ebook:
-            log.info("  %s: only an E-BOOK with this ISBN (%s TWD) - kept in case no printed copy is found", shop, price)
-            self.ebook = self.found(price, f"{shop} (e-book, same ISBN)", url, "ebook", self.isbn)
 
     def offer_similar(self, price, shop, url, their_isbn, their_title, year, how, their_author=""):
         if not price or not self.cfg.market_similar or not same_language(self.isbn, their_isbn):
@@ -260,15 +263,13 @@ class Hunt:
         return max(self.candidates, key=lambda c: c["_score"]) if self.candidates else {}
 
     def check(self, shop, their_isbn, their_title, their_author, price, url, year, how, ebook=False) -> dict:
-        """Judge one product: ours -> the result; our ISBN as e-book / another edition -> kept as fallback."""
-        if their_isbn == self.isbn:
-            if ebook:
-                self.offer_ebook(price, shop, url)
-                return {}
-            if price:
-                return self.found(price, f"{shop} ({how})", url)
+        """Judge one product: our ISBN, printed -> the result; the same book in another printed edition -> kept as
+        the last fallback. E-books and audiobooks are ignored."""
+        if ebook or not is_printed(their_title):
             return {}
-        if not ebook and same_book(self.title, self.author, their_title, their_author):
+        if their_isbn == self.isbn:
+            return self.found(price, f"{shop} ({how})", url) if price else {}
+        if same_book(self.title, self.author, their_title, their_author):
             self.offer_similar(price, shop, url, their_isbn, their_title, year, how, their_author)
         return {}
 
@@ -284,10 +285,11 @@ class Hunt:
             f = h.get("fields") or {}
             codes = _isbns_of(f)
             their = self.isbn if self.isbn in codes else next(iter(sorted(codes)), "")
-            got = self.check("eslite", their, taiwan._text(f.get("name")), taiwan._text(f.get("author")),
+            author = " ".join(taiwan._text(f.get(k)) for k in ("author", "author_orig") if f.get(k))
+            got = self.check("eslite", their, taiwan._text(f.get("name")), author,
                              _price(f.get("mprice"), f.get("final_price")),
                              f"https://www.eslite.com/product/{h.get('id')}", taiwan._year(f.get("manufacturer_date")),
-                             how, ebook=bool(f.get("is_ebook")))
+                             how, ebook=not is_printed("", f.get("product_type") or "", f.get("is_ebook")))
             if got:
                 log.info("  eslite q=%s (%s): %s TWD", q, how, got["market_price"])
                 return got
@@ -313,10 +315,11 @@ class Hunt:
         price = _price(prod.get("final_price"), prod.get("retail_price"), prod.get("mprice"))
         oop = " - out of print" if prod.get("product_button_status") == "out_of_print" else ""
         name = taiwan._text(prod.get("name") or prod.get("title"))
-        author = taiwan._text(prod.get("author") or prod.get("authors") or prod.get("author_name"))
+        author = " ".join(taiwan._text(prod.get(k)) for k in ("author", "author_orig", "authors", "author_name")
+                          if prod.get(k))
         got = self.check("eslite", their, name, author, price, url,
                          taiwan._year(prod.get("manufacturer_date") or prod.get("publish_date")), how,
-                         ebook=bool(prod.get("is_ebook")))
+                         ebook=not is_printed("", prod.get("product_type") or "", prod.get("is_ebook")))
         if got and oop:
             got["market_source"] += oop
         log.info("  eslite product %s: %s", pid, f"ISBN matches, {price} TWD{oop}" if got
@@ -365,7 +368,7 @@ class Hunt:
         got = self.check("books_tw", their, info.get("title", ""), info.get("author", ""), price,
                          taiwan.BOOKS_PRODUCT.format(id=pid), info.get("year", ""), how, ebook=pid.startswith("E"))
         log.info("  books.com.tw product %s: %s", pid, f"ISBN matches, {price} TWD" if got
-                 else f"ISBN {their} - not this book" if their != self.isbn else "same ISBN (e-book)")
+                 else f"ISBN {their} - not this book" if their != self.isbn else "same ISBN, but not a printed book")
         return got
 
     def books_search(self, q: str, how: str) -> dict:
@@ -381,9 +384,8 @@ class Hunt:
             log.info("  books.com.tw q=%s (%s): no products on the result page (saved to %s)", q, how, path)
             return {}
         printed = [i for i in ids if not i.startswith("E")]
-        ebooks = [i for i in ids if i.startswith("E")]
         limit = 2 if how in ("isbn", "isbn10") else self.cfg.market_title_pages
-        for pid in printed[:limit] + (ebooks[:1] if how in ("isbn", "isbn10") else []):
+        for pid in printed[:limit]:                         # e-books (E...) are never used
             got = self.books_product(pid, how, referer)
             if got:
                 return got
@@ -429,17 +431,16 @@ class Hunt:
         cfg, kinds = self.cfg, self.cfg.market_search
         shops = [s for s in cfg.market_providers if s in SHOP_SITES]
         web = websearch.enabled(cfg)
+        if "ncl" in cfg.market_providers:
+            yield "ncl", self.ncl, ()
         for shop in shops:
             for kind in ("isbn", "isbn10"):
                 q = self.isbn if kind == "isbn" else isbn10(self.isbn)
                 if kind in kinds and q:
                     yield shop, (self.eslite_search if shop == "eslite" else self.books_search), (q, kind)
-        if "ncl" in cfg.market_providers:
-            yield "ncl", self.ncl, ()
         if web:
             for shop in shops:
                 yield "web", self.web_isbn, (shop,)
-        yield "fallback", self.take_ebook, ()
         if "title" in kinds and search_title(self.title):
             for shop in shops:
                 yield shop, (self.eslite_search if shop == "eslite" else self.books_search), (search_title(self.title),
@@ -448,11 +449,6 @@ class Hunt:
         if web and "title" in kinds and cfg.market_similar:
             yield "web", self.web_title, ()
         yield "fallback", self.take_similar, ()
-
-    def take_ebook(self) -> dict:
-        if self.ebook:
-            log.info("  no printed copy with this ISBN anywhere - using the e-book's price")
-        return self.ebook
 
     def take_similar(self) -> dict:
         best = dict(self.similar)
@@ -463,7 +459,7 @@ class Hunt:
 
     def ncl(self) -> dict:
         progress.step("market", f"ncl: looking up registered price for {self.isbn}")
-        got = taiwan.from_ncl(self.isbn, self.cfg)
+        got = taiwan.from_ncl(self.isbn, self.cfg, title=self.title)
         price = _price(got.get("list_price"))
         if not price:
             log.info("  ncl: %s", "record found but no price in it" if got else "no record found")
@@ -570,7 +566,7 @@ def addon_price(addon: str, isbn: str = ""):
 
 def find_market_price(isbn: str, title: str, cfg: Config, use_cache: bool = True, author: str = "") -> dict:
     """{"market_price": "300", "market_currency": "TWD", "market_source": "eslite (isbn)", "market_url": ...,
-        "market_match": "exact" | "ebook" | "similar", "market_isbn": <ISBN of the edition priced>} or {}.
+        "market_match": "exact" | "similar", "market_isbn": <ISBN of the edition priced>} or {}.
     See Hunt for the order. Every answer is cached; a 'not found' made without a title is not, so it is retried once
     the title is known."""
     isbn = normalize(isbn or "") or ""
@@ -624,7 +620,7 @@ def suggest_price(market_price, market_currency: str, cfg: Config, match: str = 
     amount = round_to(mp * cfg.price_ratio, round_step(cur, cfg))
     text = f"{amount:.2f}".rstrip("0").rstrip(".")
     basis = f"{cfg.price_ratio:.0%} of {market_price} {cur}"
-    basis += {"similar": " (other edition)", "ebook": " (e-book price)"}.get(match, "")
+    basis += {"similar": " (other edition)"}.get(match, "")
     return {"price": text, "currency": cur, "price_basis": basis}
 
 
@@ -640,13 +636,18 @@ def apply_market(row: dict, cfg: Config, use_cache: bool = True, reprice: bool =
     """Fill the row's market_* fields (if missing) and its price (if empty, or if reprice and the price was auto-set).
     Returns problems as text (never raises)."""
     problems = []
-    if (row.get("market_source") or "").startswith("barcode"):
-        # an older run read the printed price with the wrong currency: forget it (and the price worked out from it)
-        # so the shops get asked first and the printed price is re-read with the right currency
-        if (row.get("price_basis") or "") not in ("", "manual", "caption"):
-            row["price"], row["price_basis"] = "", ""
-        for k in MARKET_FIELDS:
-            row[k] = ""
+    printed = addon_price(row.get("barcode_addon", ""), row.get("isbn13", "")) if "barcode" in cfg.market_providers \
+        else None
+    if (row.get("market_source") or "").startswith("barcode") and \
+            (row.get("market_price"), row.get("market_currency")) != (printed or (None, None)):
+        forget_market(row)        # read with an older rule (e.g. the wrong currency): read it again below
+    if printed and (not row.get("market_price") or row.get("market_match") == "similar"):
+        # FIRST choice: the price printed on this very copy (beats everything, even a price found online)
+        if row.get("market_price"):
+            forget_market(row)
+        row["market_price"], row["market_currency"] = printed
+        row["market_source"], row["market_url"] = "barcode (price printed on the book)", ""
+        row["market_match"], row["market_isbn"] = "exact", row.get("isbn13", "")
     if not row.get("market_price"):
         got = find_market_price(row.get("isbn13", ""), row.get("title", ""), cfg, use_cache,
                                 author=row.get("author", ""))
@@ -654,12 +655,6 @@ def apply_market(row: dict, cfg: Config, use_cache: bool = True, reprice: bool =
         for k in MARKET_FIELDS:
             if got.get(k):
                 row[k] = got[k]
-    if not row.get("market_price") and "barcode" in cfg.market_providers:   # last resort: the printed price
-        printed = addon_price(row.get("barcode_addon", ""), row.get("isbn13", ""))
-        if printed:
-            row["market_price"], row["market_currency"] = printed
-            row["market_source"], row["market_url"] = "barcode (price printed on the book - check it)", ""
-            row["market_match"], row["market_isbn"] = "exact", row.get("isbn13", "")
     auto = (row.get("price_basis") or "") not in ("", "manual")
     if cfg.auto_price and row.get("market_price") and (not row.get("price") or (reprice and auto)):
         try:

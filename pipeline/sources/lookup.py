@@ -24,7 +24,7 @@ from ..core.config import Config
 from ..core.isbn import isbn10_to_13, normalize
 
 log = logging.getLogger("pipeline.lookup")
-FIELDS = ("title", "author", "publisher", "year", "pages")  # what is stored per book (sources may return more)
+FIELDS = ("title", "author", "publisher", "year", "pages", "genre")  # stored per book (sources may return more)
 TW_PREFIXES = ("978957", "978986", "978626")
 APP_UA = "BookSellingPipeline/1.0"
 
@@ -104,7 +104,7 @@ def from_openlibrary_search(isbn: str, cfg: Config) -> dict:
 # ---- Google Books ------------------------------------------------------------------------------
 GOOGLE_URL = "https://www.googleapis.com/books/v1/volumes"
 GOOGLE_FIELDS = ("totalItems,items(id,volumeInfo(title,subtitle,authors,publisher,publishedDate,pageCount,printType,"
-                 "industryIdentifiers,imageLinks/thumbnail,imageLinks/smallThumbnail))")
+                 "industryIdentifiers,categories))")
 
 
 def _google_isbns(v: dict) -> set:
@@ -117,7 +117,7 @@ def _google_isbns(v: dict) -> set:
 
 
 GOOGLE_VOLUME_FIELDS = ("id,volumeInfo(title,subtitle,authors,publisher,publishedDate,pageCount,printType,"
-                        "industryIdentifiers,imageLinks)")
+                        "industryIdentifiers,categories)")
 GOOGLE_LINKS_URL = "https://books.google.com/books"
 _JSONP_RE = re.compile(r"^[^(]*\((.*)\)\s*;?\s*$", re.S)
 
@@ -172,16 +172,15 @@ def _google_result(v: dict) -> dict:
     title = v.get("title", "")
     if v.get("subtitle"):
         title = f"{title}: {v['subtitle']}"
-    links = v.get("imageLinks") or {}
-    cover = (links.get("large") or links.get("medium") or links.get("small") or links.get("thumbnail")
-             or links.get("smallThumbnail") or "")
+    from .genre import from_path
+    cats = v.get("categories") or []
     return {
         "title": title,
         "author": ", ".join(v.get("authors", [])),
         "publisher": v.get("publisher", ""),
         "year": _year(v.get("publishedDate")),
         "pages": v.get("pageCount"),
-        "cover_url": cover.replace("http://", "https://"),
+        "genre": from_path(cats[0]) if cats else "",      # 'Juvenile Fiction / Action & Adventure / General'
     }
 
 
@@ -285,7 +284,7 @@ PROVIDERS: dict = {"openlibrary": from_openlibrary, "openlibrary_search": from_o
 
 
 # bump a number when a provider's lookup changes, so old cached answers (especially "not found") are ignored
-PROVIDER_VERSION = {"google": 3}
+PROVIDER_VERSION = {"google": 4, "eslite": 2, "books_tw": 2, "ncl": 2}   # 2026-10: + genre
 
 
 def _cache_name(name: str) -> str:
@@ -329,7 +328,8 @@ def lookup_book(isbn: str, cfg: Config, providers: dict = None, use_cache: bool 
     tw = is_taiwan(isbn)
     cache = net.Cache(cfg.cache_dir / "lookups.json", cfg.cache_days, cfg.cache_miss_days)
     for name in providers_for(isbn, cfg):
-        if cfg.stop_when and all(result.get(k) for k in cfg.stop_when) and (not tw or has_cjk(result.get("title"))):
+        if cfg.stop_when and all(result.get(k) for k in cfg.stop_when) and \
+                (not tw or (has_cjk(result.get("title")) and ("genre" not in cfg.stop_when or has_cjk(result.get("genre"))))):
             break  # everything we need is filled: don't spend more calls / quota
         if net.blocked(name):
             msg = f"{name}: {net.blocked(name)}"
@@ -356,7 +356,7 @@ def lookup_book(isbn: str, cfg: Config, providers: dict = None, use_cache: bool 
         for k in FIELDS:
             if got.get(k) and not result.get(k):
                 result[k] = got[k]
-            elif tw and k in ("title", "author") and has_cjk(got.get(k)) and not has_cjk(result.get(k)):
+            elif tw and k in ("title", "author", "genre") and has_cjk(got.get(k)) and not has_cjk(result.get(k)):
                 result.setdefault(f"{k}_other", result[k])     # keep the English one for the market search
                 result[k] = got[k]
     result["source"] = "+".join(used)

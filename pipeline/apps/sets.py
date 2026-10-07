@@ -12,7 +12,9 @@ from ..photos import decode  # noqa: F401  (registers HEIC support)
 from ..core.config import Config
 from ..photos.grid import numbered, parse_grid, stamp_number  # noqa: F401  (parse_grid re-exported for the CLI)
 
-COND_LABEL = {"new": "New", "like_new": "Like new", "good": "Good", "acceptable": "Acceptable", "poor": "Poor"}
+from ..core.validate import CONDITION_ZH
+
+COND_LABEL = {**CONDITION_ZH, "acceptable": CONDITION_ZH["fair"]}   # listings are for Taiwanese buyers: 近全新 ...
 
 
 def make_label_sheet(dst, count: int = 10, per_row: int = 5) -> None:

@@ -48,3 +48,25 @@ def test_env_rejects_typo_provider(tmp_path, monkeypatch):
     monkeypatch.setenv("BOOK_PROVIDERS", "openlibary")
     with pytest.raises(SystemExit):
         Config.from_env()
+
+
+def test_price_add_on_is_read_with_the_isbn(tmp_path):
+    import pytest
+    from pipeline.photos import decode as dec
+    from synth import TW_ISBNS, book_back
+    if dec.zxingcpp is None and getattr(getattr(dec.pyzbar, "ZBarSymbol", None), "EAN5", None) is None:
+        pytest.skip("needs zxing-cpp (or zbar with EAN-5) to read add-ons")
+    dec.ADDONS.clear()
+    img = book_back(TW_ISBNS[0], size=(1200, 1600), module=3.0, addon="00350", price_code="")
+    assert dec.decode_isbn_image(img) == TW_ISBNS[0]
+    assert dec.ADDONS.get(TW_ISBNS[0]) == "00350"
+
+
+def test_add_on_search_area_is_right_of_the_isbn_barcode():
+    from PIL import Image
+    from pipeline.photos.decode import Detection, addon_crops, read_addon
+    img = Image.new("RGB", (1000, 800), "white")
+    crops = addon_crops(img, Detection("9789861371955", cx=300, cy=400, width=200))
+    assert len(crops) == 1 and crops[0].width >= 1800 * 0.99           # enlarged
+    assert addon_crops(img, Detection("9789861371955")) == []         # no position known: whole photo only
+    assert read_addon(img, "9789861371955") == ""                      # nothing there: no crash, no guess

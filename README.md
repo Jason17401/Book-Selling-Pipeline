@@ -1,4 +1,4 @@
-# Book Selling Pipeline (TW)
+# Book Selling Pipeline
 
 Photograph a set of books, send the photos to a Telegram bot, and get every book's ISBN, title, author and the price of
 a new copy - with your selling price worked out for you. You fix anything missing in a simple review window, then make
@@ -139,14 +139,15 @@ Double-click **`bot.bat`** and leave its window open while you work. It shows ea
 
 **Captions** (optional, typed with a photo):
 
-| Caption                      | On the front photo                                    | On a barcode photo                                                    |
-| ---------------------------- | ----------------------------------------------------- | --------------------------------------------------------------------- |
-| `good` / `poor` / `new` ...  | condition of every book in the set                    | condition of that book                                                |
-| `good 150` or `good 150 TWD` | condition + price for every book                      | condition + price for that book                                       |
-| `retake`                     | -                                                     | replaces the previous barcode photo (send it right after the bad one) |
-| `front`                      | starts a new set early (a set of fewer than 10 books) | -                                                                     |
+| Caption                                                                                          | On the front photo                                    | On a barcode photo                                                    |
+| ------------------------------------------------------------------------------------------------ | ----------------------------------------------------- | --------------------------------------------------------------------- |
+| a condition: `全新` `近全新` `良好` `普通` `差強人意` (or `new` `like new` `good` `fair` `poor`) | condition of every book in the set                    | condition of that book                                                |
+| condition + price: `良好 150`, `good 150 TWD`                                                    | condition + price for every book                      | condition + price for that book                                       |
+| `retake`                                                                                         | -                                                     | replaces the previous barcode photo (send it right after the bad one) |
+| `front`                                                                                          | starts a new set early (a set of fewer than 10 books) | -                                                                     |
 
-Without a caption, books are `like_new` and priced from the market price.
+Without a caption, books are 近全新 (`like_new`) and priced from the market price. The grades are explained in
+[section 6.1](#61-condition-grades).
 
 ### 4.3 Process
 
@@ -156,22 +157,27 @@ the list of books that still need something.
 
 ### 4.4 Review and fix (on the computer)
 
-Double-click **`review.bat`** (the bot can keep running). Books that need something have a **red dot**; the right side
-shows the photos, what is missing in plain words, and the fields.
+Double-click **`review.bat`** (the bot can keep running). Every newly processed book is listed:
+
+- **Red - to fix:** something is missing or wrong (e.g. no ISBN, no price). The fields to fix are outlined in red.
+- **Amber - quick check:** everything was found. Glance at the photos and fields; if they look right just press
+  **Save / looks right** (or `Ctrl+Enter` to save and go to the next one) - nothing needs typing.
+- **Green - checked:** you have saved it. Only checked books go into listings.
 
 - **Barcode not read:** read the 13 digits under the barcode in the photo (click it to enlarge), type them, press
   **Look up**, check, **Save**.
 - **Price missing:** no market price was found. Type your price (and currency), or find the book online - **Search the
   web** opens a Google search; paste the shop's product link into **Shop link** and press **Use link**.
-- **"Other edition" / "e-book" note under the market price:** the price came from another printing or the e-book of
-  the same book - check it looks right.
+- **"Other edition" note under the market price:** the price came from another printing of the same book (same
+  title and author, different ISBN/year) - check it looks right.
 - **Whole set** fills an empty condition or price for every book of the set at once.
 
-`Ctrl+S` saves, `Ctrl+Enter` saves and jumps to the next red book. A book turns green when it is complete.
+`Ctrl+S` saves, `Ctrl+Enter` saves and jumps to the next red or amber book. Tick **Show checked books too** to see
+the green ones again.
 
 ### 4.5 Make listings
 
-When a set is all green, press **Make listings for finished sets**. Each set gets a folder in `data\listings\sets`
+When every book of a set is green (checked), press **Make listings for finished sets**. Each set gets a folder in `data\listings\sets`
 with the numbered front photo and `listing.txt` (every book with its number, condition and price). Post them, then
 set those books' `status` to `listed` (and later `sold`).
 
@@ -183,29 +189,37 @@ set those books' `status` to `listed` (and later `sold`).
 | `/status`           | where you are: which set, how many barcode photos saved                         |
 | `/undo`             | removes the last photo you sent                                                 |
 | `/process`          | processes every photo sent so far (`/process 20` also checks you sent 20 books) |
-| `/todo`             | which books still need fixing                                                   |
+| `/todo`             | which books still need fixing, and how many just need a quick check             |
 
 ---
 
 ## 5. How books and prices are found
 
-**Book details.** Taiwanese ISBNs (978-957, 978-986, 978-626) are looked up on eslite, books.com.tw, Google Books,
-NCL (Taiwan's ISBN agency) and Open Library; other ISBNs on Open Library, Google Books and ISBNdb. For Taiwanese books
-the Chinese title is always preferred over an English one. Every answer is remembered in `data\cache`, so
-processing a book again costs nothing.
+**Book details** (title, author, publisher, year, pages, genre). Taiwanese ISBNs (978-957, 978-986, 978-626) are
+asked, in order (`BOOK_PROVIDERS_TW`): **Google Books → NCL → eslite → books.com.tw → Open Library**; other ISBNs:
+Open Library → Google Books → ISBNdb. Later sources only fill what is still empty, and the search stops once title,
+author, publisher, year and genre are known. For Taiwanese books the **Chinese** title and genre are always preferred
+over English ones, so a book Google only knows in English is looked up further. Every answer is remembered in
+`data\cache`, so processing a book again costs nothing.
 
-**Market price** = the list price (定價) of a **new** copy, searched cheapest and most exact first:
+- **NCL** (國家圖書館 全國新書資訊網, Taiwan's ISBN agency) is searched by ISBN in its catalogue. When the title in the
+  result is a link, the full record behind it gives the registered price (定價) and the subject heading (主題標題).
+- **Genre** is stored as _overarching > most specific_, e.g. `童書 > 冒險／驚悚小說`: from NCL's subject heading,
+  eslite's category levels, books.com.tw's 本書分類 / breadcrumb, or Google's category. Navigation steps that are not
+  genres (首頁, 中文書, the book's own title ...) are left out.
 
-1. the ISBN in eslite's and books.com.tw's own search
-2. NCL - the price the publisher registered (finds out-of-print books)
-3. a web search for the ISBN, e.g. `9789574760190 site:eslite.com` - only with a Tavily / LangSearch key
-4. the **e-book** with the same ISBN
-5. the title in the shops' search → the same book in **another edition** (same title and author, Taiwanese edition,
-   never a boxed set or another volume)
+**Market price** = the list price (定價) of a **new, printed** copy, first match wins:
+
+1. the small **price barcode** printed next to the ISBN barcode, read from your barcode photo (free, instant)
+2. **NCL** - the price the publisher registered (finds out-of-print books)
+3. the ISBN in eslite's and books.com.tw's own search
+4. a web search for the ISBN, e.g. `9789574760190 site:eslite.com` - only with a Tavily / LangSearch key
+5. the title in the shops' search → the same book in **another printed edition** (same title and author, Taiwanese
+   edition, never a boxed set or another volume)
 6. one web search for title + author
-7. the small price barcode printed next to the ISBN barcode
 
-Steps 4-7 are marked in the `market_match` column (`ebook`, `similar`) and in the review window, so you can check them.
+E-books and audiobooks are never used. Step 5-6 prices are marked `similar` in the `market_match` column and in the
+review window, so you can check them.
 
 **Your price** = market price × `PRICE_RATIO` (40%) in the **same currency** - 300 TWD → 120 TWD. A price you type or
 caption is never changed automatically.
@@ -217,25 +231,45 @@ caption is never changed automatically.
 Everything lives in **`data\books.csv`** (one row per book). Edit it with the review window rather than Excel - Excel
 turns ISBNs into `9.78E+12` and locks the file.
 
-| Column                                                                                 | Meaning                                                                             |
-| -------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| `sku`, `batch`, `set_id`, `position`                                                   | unique id; when it was processed; set (S01, S02 ...); number in the set (1-10)      |
-| `isbn13`, `title`, `author`, `publisher`, `year`, `pages`                              | the book                                                                            |
-| `condition`                                                                            | `new`, `like_new`, `good`, `acceptable`, `poor` (required)                          |
-| `price`, `currency`, `price_basis`                                                     | your price (required) and how it was set: `40% of 300 TWD`, `caption` or `manual`   |
-| `market_price`, `market_currency`                                                      | list price of a new copy                                                            |
-| `market_source`, `market_url`                                                          | where it was found, and the page to check it                                        |
-| `market_match`, `market_isbn`                                                          | `exact`, `ebook`, `similar` (another edition) or `manual`; the ISBN that was priced |
-| `front_photo`, `barcode_photo`                                                         | the set's front photo and this book's barcode photo                                 |
-| `status`, `errors`                                                                     | see below; `errors` names what is still missing                                     |
-| `source`, `notes`, `created_at`, `trademe_id`, `ebay_id`, `fb_status`, `barcode_addon` | bookkeeping                                                                         |
+| Column                                                                                 | Meaning                                                                            |
+| -------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| `sku`, `batch`, `set_id`, `position`                                                   | unique id; when it was processed; set (S01, S02 ...); number in the set (1-10)     |
+| `isbn13`, `title`, `author`, `publisher`, `year`, `pages`                              | the book                                                                           |
+| `genre`                                                                                | e.g. `童書 > 冒險／驚悚小說` (overarching > most specific)                         |
+| `condition`                                                                            | one of the five grades below (required)                                            |
+| `price`, `currency`, `price_basis`                                                     | your price (required) and how it was set: `40% of 300 TWD`, `caption` or `manual`  |
+| `market_price`, `market_currency`                                                      | list price of a new copy                                                           |
+| `market_source`, `market_url`                                                          | where it was found, and the page to check it                                       |
+| `market_match`, `market_isbn`                                                          | `exact`, `similar` (another printed edition) or `manual`; the ISBN that was priced |
+| `front_photo`, `barcode_photo`                                                         | the set's front photo and this book's barcode photo                                |
+| `status`, `errors`                                                                     | see below; `errors` names what is still missing                                    |
+| `source`, `notes`, `created_at`, `trademe_id`, `ebay_id`, `fb_status`, `barcode_addon` | bookkeeping                                                                        |
 
-| Status           | Meaning                                                                      |
-| ---------------- | ---------------------------------------------------------------------------- |
-| `needs_manual`   | not identified yet: barcode unreadable, ISBN wrong, or no title/author found |
-| `enriched`       | identified, but price or condition missing, or a value is invalid            |
-| `validated`      | complete - goes into "Make listings"                                         |
-| `listed`, `sold` | set these yourself; the pipeline never changes them                          |
+### 6.1 Condition grades
+
+The five grades used by [TAAZE 讀冊生活](https://www.taaze.tw/), Taiwan's largest used-book marketplace, so Taiwanese
+buyers know them. Listings show the Chinese name. The descriptions are a practical guide in the spirit of those
+grades (TAAZE's staff judge each book; they don't publish exact rules).
+
+| Grade                           | Code       | Means                                                                                                                                    |
+| ------------------------------- | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| **全新** New                    | `new`      | Unread. No marks, wear or yellowing; looks as it did in the shop.                                                                        |
+| **近全新** Like new _(default)_ | `like_new` | Read carefully once or twice. No writing or highlighting; at most tiny shelf wear on edges or corners.                                   |
+| **良好** Good                   | `good`     | Clearly read, but clean and complete: light wear on cover/corners or slight yellowing; no or very little writing.                        |
+| **普通** Fair                   | `fair`     | Obvious wear: creases, yellowing, foxing (書斑), some writing or highlighting, a name on the first page. All pages present and readable. |
+| **差強人意** Poor               | `poor`     | Heavy wear: lots of writing, water marks, loose or damaged pages or cover. Readable, priced as such.                                     |
+
+Books saved earlier as `acceptable` become `fair` automatically.
+
+### 6.2 Statuses
+
+| Status           | Review window      | Meaning                                                                      |
+| ---------------- | ------------------ | ---------------------------------------------------------------------------- |
+| `needs_manual`   | red: to fix        | not identified yet: barcode unreadable, ISBN wrong, or no title/author found |
+| `enriched`       | red: to fix        | identified, but price or condition missing, or a value is invalid            |
+| `to_check`       | amber: quick check | complete - waiting for you to glance at it and press Save                    |
+| `validated`      | green: checked     | checked by you - goes into "Make listings"                                   |
+| `listed`, `sold` | -                  | set these yourself; the pipeline never changes them                          |
 
 ---
 
@@ -244,19 +278,20 @@ turns ISBNs into `9.78E+12` and locks the file.
 Run from the `Book Selling Pipeline` folder as `python -m pipeline <command>` (see 1.2). The everyday ones have
 buttons or `.bat` files; the rest are for fixing and checking.
 
-| Command                                                 | What it does                                                                                                                                                                                                                       |
-| ------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `bot`                                                   | runs the Telegram bot (= `bot.bat`)                                                                                                                                                                                                |
-| `review`                                                | opens the review window (= `review.bat`)                                                                                                                                                                                           |
-| `todo` / `status`                                       | what still needs fixing / how many books per status                                                                                                                                                                                |
-| `export-sets`                                           | makes listings for finished sets (= the button). `--set-price 40 --set-currency NZD` for one bundle price, `--with-barcodes`, `--force` to redo                                                                                    |
-| `ingest`                                                | processes `data\inbox` without the bot (photos copied there yourself)                                                                                                                                                              |
-| `market`                                                | finds market prices for books that have none. `--redo-similar` searches again for books priced from another edition / e-book; `--reprice` recomputes automatic prices after changing `PRICE_RATIO`; `market <isbn>` tests one book |
-| `titles`                                                | gives older Taiwanese books saved with an English title their Chinese title                                                                                                                                                        |
-| `lookup <isbn>`                                         | shows what each book source returns for one ISBN (`--fresh` ignores the cache)                                                                                                                                                     |
-| `check-barcode <photo>`                                 | tries to read the barcode in a photo (`--effort max` tries hardest)                                                                                                                                                                |
-| `orient <photo>`                                        | helps you find `ROTATE` for sideways front photos                                                                                                                                                                                  |
-| `fill`, `enrich`, `validate`, `labels`, `quota`, `init` | bulk-fill condition/price; re-look-up books whose ISBN you typed; recheck all statuses; printable number labels; Google calls used today; show the data folders                                                                    |
+| Command                                                 | What it does                                                                                                                                                                                                                                                |
+| ------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `bot`                                                   | runs the Telegram bot (= `bot.bat`)                                                                                                                                                                                                                         |
+| `review`                                                | opens the review window (= `review.bat`)                                                                                                                                                                                                                    |
+| `todo` / `status`                                       | what still needs fixing / how many books per status                                                                                                                                                                                                         |
+| `export-sets`                                           | makes listings for finished sets (= the button). `--set-price 40 --set-currency NZD` for one bundle price, `--with-barcodes`, `--force` to redo                                                                                                             |
+| `ingest`                                                | processes `data\inbox` without the bot (photos copied there yourself)                                                                                                                                                                                       |
+| `market`                                                | finds market prices for books that have none. `--redo-similar` searches again for books priced from another edition (or an e-book, by older versions); `--reprice` recomputes automatic prices after changing `PRICE_RATIO`; `market <isbn>` tests one book |
+| `titles`                                                | gives older Taiwanese books saved with an English title their Chinese title                                                                                                                                                                                 |
+| `genres`                                                | looks up the genre of books saved before genres existed                                                                                                                                                                                                     |
+| `lookup <isbn>`                                         | shows what each book source returns for one ISBN (`--fresh` ignores the cache)                                                                                                                                                                              |
+| `check-barcode <photo>`                                 | tries to read the barcode in a photo (`--effort max` tries hardest)                                                                                                                                                                                         |
+| `orient <photo>`                                        | helps you find `ROTATE` for sideways front photos                                                                                                                                                                                                           |
+| `fill`, `enrich`, `validate`, `labels`, `quota`, `init` | bulk-fill condition/price; re-look-up books whose ISBN you typed; recheck all statuses; printable number labels; Google calls used today; show the data folders                                                                                             |
 
 ---
 
@@ -273,9 +308,25 @@ buttons or `.bat` files; the rest are for fixing and checking.
 | The bot window shows odd characters like `←[1A`          | set `PLAIN_PROGRESS=1` in `.env`                                                                      |
 | Anything else                                            | run the step again from the command line - it prints the exact error                                  |
 
-**Coming from the older `bookpipe` folder?** Copy your `.env` and your `data` folder into this folder and redo
-section 1.2. Settings that no longer exist (`SET_SPLIT`, `BACK_ROTATE`, `PHOTO_ORDER`, `GOOGLE_COUNTRY`,
-`BRAVE_API_KEY`) are simply ignored. Note that `DEFAULT_CURRENCY` is now `TWD` unless your `.env` says otherwise.
+### Updating to a new version
+
+Your `.env`, `data` and `.venv` are never part of an update. With the project in Git:
+
+1. `git status` - commit or undo your own changes first.
+2. Delete everything except `.git`, `.env`, `data` and `.venv`:
+   `Get-ChildItem -Force | Where-Object { '.git','.env','data','.venv' -notcontains $_.Name } | Remove-Item -Recurse -Force`
+3. Copy the **contents** of the new `Book Selling Pipeline` folder from the zip into your folder.
+4. `git add -A`, `git status` (check the list), `git commit -m "Update"`, `git push`.
+5. `python -m pip install -r requirements.txt`, and `git diff HEAD~1 -- .env.example` to see new or changed settings
+   worth copying into your `.env`.
+
+Settings that no longer exist are simply ignored (`SET_SPLIT`, `BACK_ROTATE`, `PHOTO_ORDER`, `GOOGLE_COUNTRY`,
+`BRAVE_API_KEY`, `MARKET_EBOOK`). If your `.env` was made from an older version, check these three - your old values
+override the new defaults:
+
+- `BOOK_PROVIDERS_TW=google,ncl,eslite,books_tw,openlibrary`
+- `LOOKUP_STOP_WHEN=title,author,publisher,year,genre`
+- `MARKET_PROVIDERS=barcode,ncl,eslite,books_tw`
 
 ---
 
@@ -297,7 +348,3 @@ Book Selling Pipeline/
     ├── sources/                     book details, market prices, web search
     └── apps/                        Telegram bot, review window, editing, listings
 ```
-
-## 10. Credits
-
-This pipeline underwent iterative development with the help of Claude from Anthropic.

@@ -29,7 +29,7 @@ def test_listing_with_mixed_optional_prices(tmp_path):
     d = cfg.listings_dir / "sets" / "x-S01"
     text = (d / "listing.txt").read_text(encoding="utf-8")
     assert "Price (sum of the books): 5 NZD + 150 TWD" in text
-    assert "1. Title 1 - A  (5 NZD)" in text and "2. Title 2 - A\n" in text and "Good" in text
+    assert "1. Title 1 - A  (5 NZD)" in text and "2. Title 2 - A\n" in text and "良好" in text
     assert sorted(p.name for p in d.glob("*.jpg")) == ["01_front.jpg", "02_book01_barcode.jpg",
                                                        "03_book02_barcode.jpg", "04_book03_barcode.jpg"]
     assert json.loads((d / "listing.json").read_text(encoding="utf-8"))["sum_of_book_prices"] == {"NZD": 5.0, "TWD": 150.0}

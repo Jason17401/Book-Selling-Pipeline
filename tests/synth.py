@@ -29,20 +29,42 @@ def ean13_bits(code: str) -> str:
     return bits + "101"
 
 
-def barcode_image(code: str, module: int = 4, height: int = 120, quiet: int = 11) -> Image.Image:
+_ADDON5_PARITY = ["GGLLL", "GLGLL", "GLLGL", "GLLLG", "LGGLL", "LLGGL", "LLLGG", "LGLGL", "LGLLG", "LLGLG"]
+
+
+def ean5_bits(addon: str) -> str:
+    """The 5-digit add-on (price barcode) printed to the right of an ISBN barcode."""
+    d = [int(c) for c in addon]
+    check = (3 * (d[0] + d[2] + d[4]) + 9 * (d[1] + d[3])) % 10
+    bits = "1011"
+    for i, (p, c) in enumerate(zip(_ADDON5_PARITY[check], d)):
+        bits += ("01" if i else "") + (_L if p == "L" else _G)[c]
+    return bits
+
+
+def barcode_image(code: str, module: int = 4, height: int = 120, quiet: int = 11, addon: str = "") -> Image.Image:
     bits = ean13_bits(code)
-    w = (len(bits) + 2 * quiet) * module
+    gap = 9
+    extra = (gap + len(ean5_bits(addon))) if addon else 0
+    w = (len(bits) + extra + 2 * quiet) * module
     img = Image.new("L", (w, height + 2 * module * 3), 255)
     d = ImageDraw.Draw(img)
     for i, b in enumerate(bits):
         if b == "1":
             x = (quiet + i) * module
             d.rectangle([x, module * 3, x + module - 1, module * 3 + height], fill=0)
+    if addon:
+        start = quiet + len(bits) + gap
+        for i, b in enumerate(ean5_bits(addon)):
+            if b == "1":
+                x = (start + i) * module
+                d.rectangle([x, module * 3 + height // 6, x + module - 1, module * 3 + height], fill=0)
     return img.convert("RGB")
 
 
 def book_back(isbn: str, size=(1200, 1700), module: float = 3.0, seed: int = 0, price_code: str = "4710000123459",
-              angle: float = 0.0, blur: float = 0.0, jpeg: int = 0, glare: bool = False, noise: int = 0) -> Image.Image:
+              angle: float = 0.0, blur: float = 0.0, jpeg: int = 0, glare: bool = False, noise: int = 0,
+              addon: str = "") -> Image.Image:
     """A fake back cover: coloured background, 'text' lines, the ISBN barcode and a Taiwan-style price barcode."""
     rnd = random.Random(seed)
     W, H = size
@@ -51,7 +73,7 @@ def book_back(isbn: str, size=(1200, 1700), module: float = 3.0, seed: int = 0, 
     for y in range(80, int(H * 0.6), 40):  # fake paragraphs
         d.rectangle([80, y, rnd.randint(W // 2, W - 80), y + 14], fill=tuple(rnd.randint(20, 90) for _ in range(3)))
     mod = max(1, round(module))
-    bc = barcode_image(isbn, module=mod, height=int(mod * 50))
+    bc = barcode_image(isbn, module=mod, height=int(mod * 50), addon=addon)
     if module != mod:
         bc = bc.resize((int(bc.width * module / mod), int(bc.height * module / mod)), Image.BILINEAR)
     pc = barcode_image(price_code, module=mod, height=int(mod * 50)) if price_code else None

@@ -15,9 +15,12 @@ from ..sources.lookup import lookup_book
 IMG_EXT = {".jpg", ".jpeg", ".png", ".heic", ".heif", ".webp"}
 _COND_WORDS = {
     "new": "new", "likenew": "like_new", "like_new": "like_new", "mint": "like_new",
-    "good": "good", "ok": "acceptable", "fair": "acceptable", "acceptable": "acceptable",
+    "good": "good", "ok": "fair", "fair": "fair", "acceptable": "fair",
     "poor": "poor", "worn": "poor",
 }
+# Chinese condition words in a caption (longest first, so 近全新 is not read as 全新)
+_COND_ZH = [("差強人意", "poor"), ("近全新", "like_new"), ("九成新", "like_new"), ("全新", "new"), ("良好", "good"),
+            ("八成新", "good"), ("普通", "fair"), ("七成新", "fair"), ("差", "poor")]
 
 
 @dataclass
@@ -57,10 +60,15 @@ def list_photos(inbox: Path, settle_seconds: int = 5) -> list:
 
 
 def parse_caption(text: str, default_currency: str = "TWD"):
-    """'good 12.50' -> ('good', '12.50', 'NZD'); 'like new 150 TWD' -> ('like_new', '150', 'TWD').
-    Any part may be missing (all optional)."""
+    """'good 12.50' -> ('good', '12.50', 'TWD'); 'like new 150 NZD' -> ('like_new', '150', 'NZD');
+    '近全新 150' / '良好150' -> ('like_new', '150', 'TWD'). Any part may be missing (all optional)."""
     t = (text or "").replace("$", " ")
     cond, price, currency = "", "", ""
+    for word, code in _COND_ZH:
+        if word in t:
+            cond = code
+            t = t.replace(word, " ")
+            break
     for tok in re.split(r"[\s,]+", t.lower().replace("like new", "like_new")):
         if tok in _COND_WORDS and not cond:
             cond = _COND_WORDS[tok]
@@ -115,7 +123,7 @@ def enrich_rows(rows: list, cfg: Config, lookup: Callable = lookup_book) -> int:
         r["isbn13"] = isbn
         if not (r.get("title") and r.get("author")):
             meta = lookup(isbn, cfg)
-            for k in ("title", "author", "publisher", "year", "pages"):
+            for k in ("title", "author", "publisher", "year", "pages", "genre"):
                 if not r.get(k):
                     r[k] = meta.get(k, "")
             r["source"] = r.get("source") or meta.get("source", "")

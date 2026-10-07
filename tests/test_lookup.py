@@ -20,7 +20,8 @@ ESLITE_SEARCH = {"hits": {"start": 0, "found": "2", "hit": [
 ESLITE_PRODUCT = {"product_specifications": [
     {"name": "304", "tag_name": "頁數", "tag": "pages"}, {"name": "P:平裝", "tag_name": "裝訂", "tag": "coverType"}],
     "photos": [{"large_path": "https://s2.eslite.com/unsafe/fit-in/x900/s.eslite.com/upload/x.jpg"}],
-    "manufacturer_date": "2014-10-30T00:00:00.000+08:00"}
+    "manufacturer_date": "2014-10-30T00:00:00.000+08:00",
+    "level1_name": "心理勵志", "level2_name": "心理學", "level3_name": "個人成長"}
 
 BOOKS_SEARCH_HTML = """<html><body><div class="table-searchbox">
 <div class="table-td" id="prod-itemlist-E050000001"><h4><a href="//www.books.com.tw/products/E050000001?loc=P_0001_001" title="被討厭的勇氣(電子書)">x</a></h4></div>
@@ -34,6 +35,7 @@ BOOKS_PRODUCT_HTML = """<html><head><meta property="og:title" content="博客來
 <li>譯者： <a href="#">葉小燕</a></li>
 <li>出版社：<a href="#"><span>究竟</span></a> <a class="type02_btn09">新功能介紹</a></li>
 <li>出版日期：2014/10/30</li><li>語言：繁體中文</li></ul></div>
+<ul class="sort"><li>本書分類：中文書&gt; 心理勵志&gt; 人際關係&gt; 被討厭的勇氣</li></ul>
 <div class="mod_b type02_m057 clearfix"><div class="bd"><ul>
 <li>ISBN：9789861371955</li><li>叢書系列：<a>心理</a></li>
 <li>規格：平裝 / 336頁 / 14.8 x 21 x 1.69 cm / 普通級 / 單色印刷 / 初版</li><li>出版地：台灣</li></ul></div></div>
@@ -48,7 +50,7 @@ GOOGLE = {"totalItems": 2, "items": [
     {"id": "y", "volumeInfo": {"title": "被討厭的勇氣", "authors": ["岸見一郎", "古賀史健"], "publisher": "究竟",
                                "publishedDate": "2014-10-30", "pageCount": 336,
                                "industryIdentifiers": [{"type": "ISBN_10", "identifier": "9861371958"}],
-                               "imageLinks": {"thumbnail": "http://books.google.com/x.jpg"}}}]}
+                               "categories": ["Psychology / Personality / General"]}}]}
 
 
 class Resp:
@@ -106,8 +108,8 @@ def test_eslite_parsing_prefers_printed_book(tmp_path, fake):
     got = taiwan.from_eslite(TW, cfg_for(tmp_path, eslite_details=True))
     assert got["title"] == "被討厭的勇氣: 自我啟發之父阿德勒的教導"
     assert got["author"] == "岸見一郎/ 古賀史健" and got["publisher"] == "究竟出版社股份有限公司"
-    assert got["year"] == "2014" and got["pages"] == "304" and got["format"] == "平裝"
-    assert got["cover_url"].startswith("https://")
+    assert got["year"] == "2014" and got["pages"] == "304"
+    assert got["genre"] == "心理勵志 > 個人成長"            # eslite's category levels: overarching > specific
     assert len(s.calls) == 2
 
 
@@ -119,8 +121,8 @@ def test_books_tw_parsing(tmp_path, fake):
     assert got["author"].startswith("岸見一郎, 古賀史健")
     assert "新功能介紹" not in got["author"] and "譯者 葉小燕" in got["author"]
     assert got["publisher"] == "究竟" and got["year"] == "2014"
-    assert got["pages"] == "336" and got["format"] == "平裝"
-    assert "description" not in got and got["cover_url"].startswith("https://im2.book.com.tw")
+    assert got["pages"] == "336" and "description" not in got
+    assert got["genre"] == "心理勵志 > 人際關係"            # 本書分類, without 中文書 and the book's own title
 
 
 def test_books_tw_rejects_other_edition(tmp_path):
@@ -137,7 +139,7 @@ def test_google_key_in_header_not_url_and_quota_counted(tmp_path, fake):
     s = fake({"googleapis.com/books": Resp(200, GOOGLE)})
     cfg = cfg_for(tmp_path)
     got = lookup.from_google(TW, cfg)
-    assert got["title"] == "被討厭的勇氣" and got["pages"] == 336 and got["cover_url"].startswith("https://")
+    assert got["title"] == "被討厭的勇氣" and got["pages"] == 336 and got["genre"] == "Psychology > Personality"
     method, url, kw = s.calls[0]
     assert "SECRET123" not in url and "SECRET123" not in json.dumps(kw["params"])
     assert kw["headers"]["x-goog-api-key"] == "SECRET123"
@@ -269,7 +271,7 @@ def test_google_id_step_finds_book_the_isbn_search_misses(tmp_path, fake):
               "googleapis.com/books/v1/volumes": Resp(200, {"kind": "books#volumes", "totalItems": 0})})
     cfg = cfg_for(tmp_path, google_queries=("id", "isbn"))
     got = lookup.from_google(JOBS, cfg)
-    assert got["title"] == "Steve Jobs" and got["pages"] == 630 and got["cover_url"] == "https://books.google.com/l.jpg"
+    assert got["title"] == "Steve Jobs" and got["pages"] == 630 and got["genre"] == ""
     links_call, api_call = s.calls
     assert links_call[2]["params"]["bibkeys"] == f"ISBN:{JOBS}" and "x-goog-api-key" not in links_call[2]["headers"]
     assert api_call[1].endswith("/volumes/8U2oAAAAQBAJ") and api_call[2]["headers"]["x-goog-api-key"] == "SECRET123"

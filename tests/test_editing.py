@@ -93,7 +93,7 @@ def test_old_csv_is_upgraded(cfg):
 
 def test_todo_text(cfg):
     t = editing.todo_text(cfg)
-    assert "1 book(s) need attention" in t and "S01 #6" in t and "review.bat" in t
+    assert "1 book(s) need fixing" in t and "S01 #6" in t and "review.bat" in t
 
 
 def test_thumbnails_including_the_book_cut_from_the_front_photo(cfg):
@@ -103,3 +103,15 @@ def test_thumbnails_including_the_book_cut_from_the_front_photo(cfg):
     assert crop[:2] == whole[:2] == b"\xff\xd8" and crop != whole
     assert editing.thumbnail_bytes(cfg, photos[0]["path"], 200, photos[0]["pos"]) == crop      # cached
     assert list((cfg.cache_dir / "thumbs").glob("*.jpg"))
+
+
+def test_to_check_books_are_listed_and_saving_confirms_them(cfg):
+    from pipeline.core import store as st
+    rows = st.read_rows(cfg.csv_path)
+    rows[0]["status"] = "to_check"
+    st.write_rows(cfg.csv_path, rows)
+    listed = {r["sku"]: r for r in editing.list_rows(cfg)}
+    assert listed["b-S01-05"]["to_check"] and listed["b-S01-05"]["attention"] and not listed["b-S01-05"]["issues"]
+    assert "just need a quick check" in editing.todo_text(cfg)
+    r = editing.save_row(cfg, "b-S01-05", {})                     # nothing changed: Save = 'looks right'
+    assert r["status"] == "validated" and not r["attention"]

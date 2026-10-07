@@ -308,8 +308,8 @@ def _variants(img: Image.Image, effort: str = "normal") -> Iterable[Image.Image]
         yield _enhanced(img)
 
 
-def decode_isbn_image(img: Image.Image, effort: Optional[str] = None) -> Optional[str]:
-    effort = effort or _SETTINGS["effort"]
+def _find(img: Image.Image, effort: str):
+    """(the first Detection, the version of the photo it was found in) or (None, None)."""
     engines = available_engines()
     if not engines:
         raise RuntimeError("No barcode reader installed. Run: pip install zxing-cpp  (and optionally pyzbar)")
@@ -317,13 +317,99 @@ def decode_isbn_image(img: Image.Image, effort: Optional[str] = None) -> Optiona
         for name in engines:
             got = _run(name, variant)
             if got:
-                return got[0].isbn
+                return got[0], variant
         if "zxing" in engines and effort != "fast" and variant is img:
             for b in ("GlobalHistogram", "FixedThreshold"):   # other ways of deciding black vs white
-                got = _run("zxing", _scaled(img, 2000), binarizer=b)
+                v = _scaled(img, 2000)
+                got = _run("zxing", v, binarizer=b)
                 if got:
-                    return got[0].isbn
-    return None
+                    return got[0], v
+    return None, None
+
+
+def decode_isbn_image(img: Image.Image, effort: Optional[str] = None, addon: bool = True) -> Optional[str]:
+    """The ISBN in a barcode photo (None if unreadable). With addon=True it then also tries hard to read the small
+    5-digit PRICE barcode next to it (stored in ADDONS[isbn]) - that price is the first choice for the market price."""
+    effort = effort or _SETTINGS["effort"]
+    det, variant = _find(img, effort)
+    if det is None:
+        return None
+    if addon and det.isbn not in ADDONS:
+        read_addon(variant, det.isbn, det, effort)
+    return det.isbn
+
+
+# ---- the price add-on (EAN-5) -------------------------------------------------------------------
+def addon_crops(img: Image.Image, det: Optional[Detection]) -> List[Image.Image]:
+    """The area around the ISBN barcode, widened to the RIGHT where the add-on sits (about half a barcode wide),
+    enlarged so each bar gets several pixels."""
+    out = []
+    if det is not None and det.cx is not None and det.width:
+        w = det.width
+        box = (int(max(0, det.cx - 0.75 * w)), int(max(0, det.cy - 0.6 * w)),
+               int(min(img.width, det.cx + 1.6 * w)), int(min(img.height, det.cy + 0.6 * w)))
+        if box[2] - box[0] > 20 and box[3] - box[1] > 10:
+            crop = img.crop(box)
+            scale = max(1.0, 1800 / crop.width)
+            if scale > 1.05:
+                crop = crop.resize((int(crop.width * scale), int(crop.height * scale)), Image.LANCZOS)
+            out.append(crop)
+    return out
+
+
+def _addon_zxing(img: Image.Image, isbn: str) -> str:
+    if zxingcpp is None:
+        return ""
+    for mode in ("Require", "Read"):
+        try:
+            res = zxingcpp.read_barcodes(img, formats=zxingcpp.BarcodeFormat.EAN13,
+                                         ean_add_on_symbol=getattr(zxingcpp.EanAddOnSymbol, mode))
+        except (TypeError, AttributeError):
+            return ""
+        except Exception:
+            continue
+        for r in res:
+            main, addon = split_addon(r.text)
+            if normalize(main) == isbn and len(addon) == 5:
+                return addon
+    return ""
+
+
+def _addon_zbar(img: Image.Image) -> str:
+    """zbar can read the 5-digit add-on as a barcode of its own (when built with EAN-5 support)."""
+    sym = getattr(getattr(pyzbar, "ZBarSymbol", None), "EAN5", None) if pyzbar is not None else None
+    if sym is None:
+        return ""
+    try:
+        res = pyzbar.decode(img.convert("L"), symbols=[sym])
+    except Exception:
+        return ""
+    codes = {r.data.decode("ascii", "ignore") if isinstance(r.data, bytes) else str(r.data) for r in res}
+    codes = {c for c in codes if len(c) == 5 and c.isdigit()}
+    return codes.pop() if len(codes) == 1 else ""
+
+
+def read_addon(img: Image.Image, isbn: str, det: Optional[Detection] = None, effort: Optional[str] = None) -> str:
+    """Try hard to read the price add-on next to `isbn`'s barcode: the cut-out around the barcode (sharpened,
+    thresholded, slightly turned), then the whole photo at a few sizes. Remembers the answer in ADDONS. '' if none."""
+    if ADDONS.get(isbn):
+        return ADDONS[isbn]
+    effort = effort or _SETTINGS["effort"]
+    tries: List[Image.Image] = []
+    for crop in addon_crops(img, det):
+        g = ImageOps.autocontrast(crop.convert("L"), cutoff=1)
+        tries += [crop, _enhanced(crop), g.point(lambda v: 255 if v > 128 else 0).convert("RGB")]
+        if effort != "fast":
+            tries += [crop.rotate(a, expand=True, fillcolor=(255, 255, 255), resample=Image.BICUBIC) for a in (3, -3)]
+    tries += [img, _scaled(img, 2000), _enhanced(_scaled(img, 1600))]
+    if effort == "max":
+        tries += [img.resize((img.width * 2, img.height * 2), Image.LANCZOS)] if max(img.size) < 2000 else []
+    for t in tries:
+        addon = _addon_zxing(t, isbn) or _addon_zbar(t)
+        if addon:
+            ADDONS[isbn] = addon
+            return addon
+    return ""
 
 
 def decode_isbn(path) -> Optional[str]:

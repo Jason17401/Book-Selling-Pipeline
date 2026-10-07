@@ -67,7 +67,6 @@ def _dejunk(s: str) -> str:
 # ---- 誠品 eslite --------------------------------------------------------------------------------
 ESLITE_SEARCH = "https://athena.eslite.com/api/v2/search"
 ESLITE_PRODUCT = "https://athena.eslite.com/api/v1/products/{id}"
-ESLITE_IMG = "https://s.eslite.com"
 
 
 def parse_eslite_search(data: dict, isbn: str) -> Optional[dict]:
@@ -91,8 +90,10 @@ def from_eslite(isbn: str, cfg: Config) -> dict:
         headers: browser User-Agent, Referer: https://www.eslite.com/
     Reply: {"hits": {"found": "1", "hit": [{"id": "1001136022367152", "fields": {"name": ..., "author": [...],
             "manufacturer": [...], "manufacturer_date": "10/30/2014 00:00:00", "isbn": "9789861371955", ...}}]}}
-    Only a hit whose isbn/ean equals our ISBN is used. With ESLITE_DETAILS=1, one more request:
-        GET https://athena.eslite.com/api/v1/products/1001136022367152     (pages, binding)
+    Only a hit whose isbn/ean equals our ISBN is used. The genre comes from eslite's category levels
+    (level1_name ... level3_name, e.g. 童書 / 兒童文学／橋梁書 / 冒險／驚悚小說); when the search hit doesn't carry them,
+    one more request reads them (and the page count) from the product:
+        GET https://athena.eslite.com/api/v1/products/1001136022367152
     """
     data = net.request("eslite", "GET", ESLITE_SEARCH, params={"q": isbn, "size": 20, "start": 0}, memo=True,
                        headers=_headers(cfg, "https://www.eslite.com/", "application/json"),
@@ -105,15 +106,14 @@ def from_eslite(isbn: str, cfg: Config) -> dict:
     sub = _text(f.get("subtitle") or f.get("sub_title"))
     if sub and sub not in title:
         title = f"{title}: {sub}"
-    photo = _text(f.get("product_photo_url"))
     out = {
         "title": title,
         "author": _text(f.get("author")),
         "publisher": _text(f.get("manufacturer")),
         "year": _year(f.get("manufacturer_date")),
-        "cover_url": (ESLITE_IMG + photo) if photo.startswith("/") else photo,
+        "genre": eslite_genre(f, title),
     }
-    if cfg.eslite_details and hit.get("id"):
+    if (cfg.eslite_details or not out["genre"]) and hit.get("id"):
         try:
             out.update({k: v for k, v in eslite_details(str(hit["id"]), cfg).items() if v})
         except net.ProviderBlocked:
@@ -123,16 +123,18 @@ def from_eslite(isbn: str, cfg: Config) -> dict:
     return out
 
 
+def eslite_genre(d: dict, title: str = "") -> str:
+    """eslite's category levels -> '童書 > 冒險／驚悚小說' (overarching > most specific)."""
+    from .genre import from_parts
+    return from_parts([_text(d.get(f"level{i}_name")) for i in (1, 2, 3)], title)
+
+
 def parse_eslite_product(d: dict) -> dict:
-    specs = {s.get("tag"): s.get("name", "") for s in (d or {}).get("product_specifications") or [] if isinstance(s, dict)}
+    d = d or {}
+    specs = {s.get("tag"): s.get("name", "") for s in d.get("product_specifications") or [] if isinstance(s, dict)}
     pages = re.sub(r"\D", "", str(specs.get("pages") or ""))
-    binding = str(specs.get("coverType") or "")
-    binding = binding.split(":", 1)[-1]  # "P:平裝" -> "平裝"
-    photos = (d or {}).get("photos") or []
-    first = photos[0] if photos and isinstance(photos[0], dict) else {}
-    cover = first.get("large_path") or first.get("original_path") or ""
-    return {"pages": pages, "format": binding, "cover_url": cover or "",
-            "year": _year(d.get("manufacturer_date")) if d else ""}
+    return {"pages": pages, "year": _year(d.get("manufacturer_date")),
+            "genre": eslite_genre(d, _text(d.get("name")))}
 
 
 def eslite_product(product_id: str, cfg: Config) -> dict:
@@ -144,10 +146,7 @@ def eslite_product(product_id: str, cfg: Config) -> dict:
 
 
 def eslite_details(product_id: str, cfg: Config) -> dict:
-    d = net.request("eslite", "GET", ESLITE_PRODUCT.format(id=product_id),
-                    headers=_headers(cfg, "https://www.eslite.com/", "application/json"),
-                    min_interval=cfg.scrape_delay)
-    return parse_eslite_product(d or {})
+    return parse_eslite_product(eslite_product(product_id, cfg))
 
 
 # ---- 博客來 books.com.tw ------------------------------------------------------------------------
@@ -207,6 +206,7 @@ def parse_books_product(page: str, isbn: str) -> dict:
     fmt = spec.split("/")[0].strip() if spec else ""
     img = soup.find("meta", attrs={"property": "og:image"})
     sale = re.findall(r"(\d[\d,]*)\s*元", _labelled(lines, "優惠價"))
+    genre = books_genre(soup, lines, title)
     out = {
         "isbn_on_page": page_isbn or "",
         "list_price": _number(_labelled(lines, "定價")),       # 定價 = the publisher's price for a NEW copy (TWD)
@@ -218,8 +218,23 @@ def parse_books_product(page: str, isbn: str) -> dict:
         "pages": pages,
         "format": fmt if not re.search(r"\d", fmt) else "",
         "cover_url": img.get("content", "") if img else "",
+        "genre": genre,
     }
     return out if out["title"] else {}
+
+
+def books_genre(soup, lines: list, title: str = "") -> str:
+    """books.com.tw: '本書分類：中文書> 童書/青少年文學> 兒童文學' on the product page, else its breadcrumb trail
+    (博客來 > 中文書 > 童書/青少年文學 > 兒童文學 > <the book>). Store sections like 中文書 and the book's own title
+    are not genres and are left out. ('/' is part of books.com.tw's category names, so it is not a separator.)"""
+    from .genre import from_parts, from_path
+    text = _labelled(lines, "本書分類")
+    if text:
+        return from_path(text, sep=r"\s*[>›»＞]\s*", title=title)
+    crumbs = [a.get_text(" ", strip=True) for a in soup.select(
+        "ul.type04_breadcrumb li, ul.container_24.type04_breadcrumb li, [class*=breadcrumb] li, "
+        "[itemtype*=BreadcrumbList] [itemprop=name]")]
+    return from_parts(crumbs, title) if crumbs else ""
 
 
 def from_books_tw(isbn: str, cfg: Config) -> dict:
@@ -271,8 +286,9 @@ def parse_ncl(page: str, isbn: str) -> dict:
                 continue
             get = lambda k: cells[col[k]] if k in col and col[k] < len(cells) else ""
             return {"title": _dejunk(get("title")), "author": _dejunk(get("author")),
-                    "publisher": _dejunk(get("publisher")), "year": _year(get("year")),
-                    "format": _dejunk(get("format")), "list_price": _number(get("list_price"))}
+                    "publisher": _dejunk(get("publisher")), "year": _roc_year(get("year")),
+                    "format": _dejunk(get("format")), "list_price": _number(get("list_price")),
+                    "isbn_matched": isbn in row_isbns}
     # fallback: a detail-style page with "書名：..." lines
     lines = [re.sub(r"\s+", " ", t) for t in soup.get_text("\n").split("\n") if t.strip()]
     title = _labelled(lines, "書名") or _labelled(lines, "題名")
@@ -327,43 +343,83 @@ def parse_ncl_detail(page: str) -> dict:
     def get(*labels):
         for want in labels:
             for k, v in fields.items():
-                if want in k:
+                if want.lower() in k.lower():
                     return v
         return ""
+    from .genre import from_subjects
     isbn_text = get("ISBN")
-    price_text = get("定價", "價格")
-    pages = re.search(r"\d+", get("頁數"))
+    price_text = get("定價", "價格", "Price")
+    pages = re.search(r"\d+", get("頁數", "Pages"))
     binding = re.search(r"\(([^)]+)\)", isbn_text)
-    return {"title": _dejunk(get("書名", "題名")), "author": _dejunk(get("作者")),
-            "publisher": _dejunk(get("出版機構", "出版者", "出版社")), "year": _roc_year(get("出版年月", "出版日期")),
+    return {"title": _dejunk(get("書名", "題名", "Title")), "author": _dejunk(get("作者", "Author")),
+            "publisher": _dejunk(get("出版機構", "出版者", "出版社", "Publisher")),
+            "year": _roc_year(get("出版年月", "出版日期", "Publication Date", "Date")),
             "pages": pages.group(0) if pages else "", "format": binding.group(1) if binding else "",
+            "genre": from_subjects(get("主題標題", "Subject Heading", "Subject")),
             "isbns": sorted({normalize(x) for x in re.findall(r"[0-9Xx-]{10,17}", isbn_text)} - {None}),
             "list_price": _number(price_text), "price_text": price_text}
 
 
-def from_ncl(isbn: str, cfg: Config) -> dict:
-    """國家圖書館 全國新書資訊網 (Taiwan's ISBN agency) - free, no key, knows out-of-print books, and its full record
-    has the publisher's price (定價, e.g. NT$360):
-        GET https://isbn.ncl.edu.tw/NEW_ISBNNet/H30_SearchBooks.php?Pact=Search&Pval=9789869283533
-            (sets a session cookie and redirects to the result list - requests' Session keeps the cookie)
-        GET https://isbn.ncl.edu.tw/NEW_ISBNNet/main_DisplayRecord_Popup.php?Pact=view&Pkey=1050307*0123
-            (the full record: 書名, 作者, 出版機構, ISBN(裝訂方式), 定價, 出版年月, 頁數)
-    Only a record listing OUR ISBN is used. Returns title/author/publisher/year/pages/format + list_price + ncl_url.
-    """
-    base = cfg.ncl_base
-    page = net.request("ncl", "GET", f"{base}/H30_SearchBooks.php", params={"Pact": "Search", "Pval": isbn},
-                       headers=_headers(cfg, base + "/"), min_interval=cfg.scrape_delay, expect="text", memo=True) or ""
-    links = parse_ncl_links(page, base)
-    for url in links[:3]:
-        detail_page = net.request("ncl", "GET", url, headers=_headers(cfg, f"{base}/H30_SearchBooks.php"),
-                                  min_interval=cfg.scrape_delay, expect="text", memo=True) or ""
-        d = parse_ncl_detail(detail_page)
+NCL_SEARCH = "H30_SearchBooks.php"
+
+
+def _ncl_record(page: str, isbn: str, base: str, cfg: Config, where: str, strict: bool = False) -> dict:
+    """OUR book's record from an NCL result page: open the full records the titles link to (they carry 定價 and
+    主題標題) and keep the one listing our ISBN; else the result row itself (title / author / publisher only)."""
+    for url in parse_ncl_links(page, base)[:3]:
+        detail = net.request("ncl", "GET", url, headers=_headers(cfg, f"{base}/{NCL_SEARCH}"),
+                             min_interval=cfg.scrape_delay, expect="text", memo=True) or ""
+        d = parse_ncl_detail(detail)
         if isbn in d["isbns"]:
             d["ncl_url"] = url
             return d
-    if not links and page:
-        d = parse_ncl_detail(page)              # a single hit may open the full record straight away
-        if isbn in d["isbns"]:
-            d["ncl_url"] = f"{base}/H30_SearchBooks.php?Pact=Search&Pval={isbn}"
-            return d
-    return parse_ncl(page, isbn)                # at least title/author from the result list
+    d = parse_ncl_detail(page)                 # a single hit may open the full record straight away
+    if isbn in d["isbns"]:
+        d["ncl_url"] = where
+        return d
+    row = parse_ncl(page, isbn)                # the result row: title is plain text (no full record online)
+    if strict and not row.get("isbn_matched"):
+        return {}                              # a title search: the row must show OUR ISBN
+    if row:
+        row["ncl_url"] = where
+    return row
+
+
+def from_ncl(isbn: str, cfg: Config, title: str = "") -> dict:
+    """國家圖書館 全國新書資訊網 (Taiwan's ISBN agency) - free, no key, knows out-of-print books. Its catalogue search
+    returns a row per book (書名, 作者, 出版者...). When the title is a link, the full record behind it also has the
+    price the publisher registered (定價, e.g. NT$360) and the subject heading (主題標題, used as the genre).
+    Searches, until one finds a record listing OUR ISBN:
+        1. quick search:  GET {base}/H30_SearchBooks.php?Pact=Search&Pval=9789869283533
+        2. catalogue search by the ISBN field:
+                          POST {base}/H30_SearchBooks.php?Pact=DisplayAll4Simple
+                          FO_SearchField0=ISBN&FO_SearchValue0=9789869283533&FB_clicked=FB_開始查詢
+        3. quick search by the title (when known) - the record must still list our ISBN
+        full record:      GET {base}/main_DisplayRecord_Popup.php?Pact=view&Pkey=1050307*0123
+    A search that finds nothing is saved to data/cache/debug (send it if NCL keeps missing a book you can find there)."""
+    base = cfg.ncl_base
+    hdr = _headers(cfg, base + "/")
+    searches = [("isbn", "GET", f"{base}/{NCL_SEARCH}", {"params": {"Pact": "Search", "Pval": isbn}}),
+                ("catalogue", "POST", f"{base}/{NCL_SEARCH}?Pact=DisplayAll4Simple",
+                 {"data": {"FO_SearchField0": "ISBN", "FO_SearchValue0": isbn, "FO_SchRe1ation0": "AND",
+                           "FB_clicked": "FB_開始查詢", "FB_pageSID": "Simple"}})]
+    t = re.split(r"\s*[:：(（]", title or "")[0].strip()
+    if t:
+        searches.append(("title", "GET", f"{base}/{NCL_SEARCH}", {"params": {"Pact": "Search", "Pval": t}}))
+    last = ""
+    for how, method, url, kw in searches:
+        try:
+            page = net.request("ncl", method, url, headers=hdr, min_interval=cfg.scrape_delay, expect="text",
+                               memo=method == "GET", **kw) or ""
+        except net.ProviderBlocked:
+            raise
+        except Exception:
+            continue
+        where = f"{base}/{NCL_SEARCH}?Pact=Search&Pval={isbn}"
+        got = _ncl_record(page, isbn, base, cfg, where, strict=how == "title")
+        if got:
+            return got
+        last = page
+    if last:
+        net.save_debug(cfg.cache_dir, f"ncl_search_{isbn}", last)
+    return {}

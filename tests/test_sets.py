@@ -110,7 +110,7 @@ def test_process_sets_end_to_end(tmp_path):
     assert len(rows) == 10 and {r["set_id"] for r in rows} == {"S01"}
     assert [r["isbn13"] for r in rows] == [*TW_ISBNS[:5], "", *TW_ISBNS[6:10]]
     assert rows[5]["status"] == "needs_manual" and "isbn13" in rows[5]["errors"]
-    assert rows[0]["status"] == "validated"
+    assert rows[0]["status"] == "to_check"                   # complete: waits for your quick check
     assert rows[0]["condition"] == "good" and rows[0]["price"] == "150" and rows[0]["currency"] == "TWD"
     assert rows[1]["condition"] == "poor" and rows[1]["price"] == "3" and rows[1]["currency"] == "TWD"
     assert set(store.COLUMNS) >= {"front_photo", "barcode_photo", "price", "currency"}

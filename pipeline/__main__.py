@@ -31,6 +31,7 @@ def main() -> None:
     p.add_argument("photo")
     p.add_argument("--save", default="orient.jpg")
     sub.add_parser("enrich", help="look up metadata for needs_manual rows where you have typed in the ISBN")
+    sub.add_parser("genres", help="look up the genre of books saved before genres existed (or still without one)")
     sub.add_parser("titles", help="Taiwanese books saved with an English title: get the Chinese title (and redo the "
                                   "market price if it was not an exact match)")
     p = sub.add_parser("market", help="find the price of a NEW copy (eslite / books.com.tw / NCL) and fill empty prices")
@@ -112,13 +113,18 @@ def main() -> None:
               f"{net.DailyCounter(cfg.cache_dir / 'quota.json').used('google')}/{cfg.google_daily_limit}")
     elif a.cmd == "check-barcode":
         import time as _t
-        from .photos.decode import available_engines, decode_isbn_image, load_image
+        from .photos.decode import ADDONS, available_engines, decode_isbn_image, load_image
+        from .sources.market import addon_price
         print(f"Readers installed and enabled: {', '.join(available_engines()) or 'NONE - pip install zxing-cpp'}")
         for ph in a.photos:
             t0 = _t.time()
             img = load_image(ph)
             got = decode_isbn_image(img, effort=a.effort)
-            print(f"{ph}: {got or 'NOT READ'}   ({img.width}x{img.height}, {_t.time() - t0:.1f}s)")
+            addon = ADDONS.get(got, "") if got else ""
+            price = addon_price(addon, got or "") if addon else None
+            shown = f"   price barcode {addon}" + (f" = {price[0]} {price[1]}" if price else " (currency unknown)") \
+                if addon else ("   price barcode: not read" if got else "")
+            print(f"{ph}: {got or 'NOT READ'}{shown}   ({img.width}x{img.height}, {_t.time() - t0:.1f}s)")
     elif a.cmd == "orient":
         from .photos.decode import exif_orientation, load_image
         from .photos.grid import make_orient_sheet
@@ -144,6 +150,24 @@ def main() -> None:
                     r.update(changed[r["sku"]])
         store.update_rows(cfg.csv_path, apply)
         print(f"enriched {n} row(s)")
+    elif a.cmd == "genres":
+        from .sources.lookup import lookup_book
+        work = store.read_rows(cfg.csv_path)
+        found = {}
+        for r in work:
+            if r.get("status") in ("listed", "sold") or r.get("genre") or not r.get("isbn13"):
+                continue
+            g = lookup_book(r["isbn13"], cfg).get("genre", "")
+            print(f"{r['sku']}  {r['isbn13']}  {(r.get('title') or '')[:30]:<30}  {g or '-'}")
+            if g:
+                found[r["sku"]] = g
+
+        def apply(rows):
+            for r in rows:
+                if r["sku"] in found and not r.get("genre"):
+                    r["genre"] = found[r["sku"]]
+        store.update_rows(cfg.csv_path, apply)
+        print(f"{len(found)} genre(s) added")
     elif a.cmd == "titles":
         import logging
         logging.basicConfig(level=logging.WARNING, format="%(message)s")
@@ -207,7 +231,7 @@ def main() -> None:
             rows = store.read_rows(cfg.csv_path)
             c = validate_rows(rows, cfg)
             store.write_rows(cfg.csv_path, rows)
-        print(f"validated: {c['validated']}   failed: {c['failed']}")
+        print("   ".join(f"{k}: {v}" for k, v in c.items() if v) or "no books yet")
         for r in rows:
             if r["status"] in ("needs_manual", "enriched"):
                 print(f"  {r['sku']}  {r['status']:<12} {r['isbn13'] or '-':<14} to fix: {r['errors']}")
@@ -251,8 +275,9 @@ def main() -> None:
         counts = Counter(r["status"] for r in store.read_rows(cfg.csv_path))
         meaning = {"needs_manual": "book not identified yet (ISBN / title / author missing)",
                    "enriched": "identified, but price or condition missing/invalid, or a photo missing",
-                   "validated": "complete, ready for a listing", "listed": "posted by you", "sold": "sold"}
-        for st in ("needs_manual", "enriched", "validated", "listed", "sold"):
+                   "to_check": "complete - give it a quick check in the review window and Save",
+                   "validated": "checked by you, ready for a listing", "listed": "posted by you", "sold": "sold"}
+        for st in ("needs_manual", "enriched", "to_check", "validated", "listed", "sold"):
             print(f"  {st:<13}{counts.pop(st, 0):>5}   {meaning[st]}")
         for st, n in counts.items():
             print(f"  {st:<13}{n:>5}")

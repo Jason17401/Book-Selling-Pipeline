@@ -80,7 +80,7 @@ def test_fix_a_book_and_save(gui, cfg):
     assert rows["b-S01-06"]["isbn13"] == "9789861371955" and rows["b-S01-06"]["status"] == "validated"
     assert rows["b-S01-06"]["trademe_id"] == "keep-me" and rows["b-S01-05"]["title"] == "Done"
     assert rows["b-S01-06"]["price"] == "6" and rows["b-S01-06"]["currency"] == "TWD"
-    assert "ready" in w.list.currentItem().text()
+    assert "checked" in w.list.currentItem().text()          # saving = checked by you
 
 
 def test_lookup_fills_only_empty_fields(gui, cfg, monkeypatch):
@@ -100,12 +100,12 @@ def test_fill_whole_set(gui, cfg):
     w = gui.ReviewWindow(cfg)
     gui.settle()
     ed = w.editor
-    ed.set_condition.setCurrentIndex(ed.set_condition.findData("acceptable"))
+    ed.set_condition.setCurrentIndex(ed.set_condition.findData("fair"))
     ed.set_price.setText("4")
     ed.fill_set()
     gui.settle()
     rows = {r["sku"]: r for r in store.read_rows(cfg.csv_path)}
-    assert rows["b-S01-06"]["condition"] == "acceptable" and rows["b-S01-06"]["price"] == "4"
+    assert rows["b-S01-06"]["condition"] == "fair" and rows["b-S01-06"]["price"] == "4"
     assert rows["b-S01-06"]["currency"] == "TWD" and rows["b-S01-07"]["price"] == "abc"   # filled only blanks
     assert rows["b-S01-05"]["condition"] == "like_new" and rows["b-S01-05"]["price"] == "5"
 
@@ -199,3 +199,21 @@ def test_paste_shop_link(gui, cfg, monkeypatch):
     gui.settle()
     assert ed.market_price.text() == "420" and ed.price.text() == "168" and ed.currency.text() == "TWD"
     assert ed.values()["market_url"] == "https://www.eslite.com/product/1001247312496322"
+
+
+def test_to_check_books_show_and_save_confirms(gui, cfg):
+    rows = store.read_rows(cfg.csv_path)
+    rows[0]["status"] = "to_check"                         # b-S01-05: complete, just processed
+    store.write_rows(cfg.csv_path, rows)
+    w = gui.ReviewWindow(cfg)
+    gui.settle()
+    texts = [w.list.item(i).text() for i in range(w.list.count())]
+    assert any("S01 #5" in t and "quick check" in t for t in texts)
+    assert "to check" in w.count.text() and "to fix" in w.count.text()
+    i = next(i for i, t in enumerate(texts) if "S01 #5" in t)
+    w.list.setCurrentRow(i)
+    gui.settle()
+    assert w.editor.row["sku"] == "b-S01-05"
+    assert w.editor.save()                                # nothing changed - 'Save / looks right'
+    assert {r["sku"]: r for r in store.read_rows(cfg.csv_path)}["b-S01-05"]["status"] == "validated"
+    assert "checked" in w.list.item(i).text()

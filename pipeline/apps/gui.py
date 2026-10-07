@@ -23,12 +23,11 @@ from PyQt6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QFormL
 
 from . import editing
 from ..core.config import Config
-from ..core.validate import CONDITIONS
+from ..core.validate import CONDITION_GRADES
 
-RED, GREEN = "#b42318", "#1e7a3c"
-CONDITION_ORDER = [c for c in ("new", "like_new", "good", "acceptable", "poor") if c in CONDITIONS]
+RED, GREEN, AMBER = "#b42318", "#1e7a3c", "#b45309"
 LINE_FIELDS = [("isbn13", "ISBN (13 digits)"), ("title", "Title"), ("author", "Author"), ("publisher", "Publisher"),
-               ("year", "Year"), ("pages", "Pages")]
+               ("year", "Year"), ("pages", "Pages"), ("genre", "Genre")]
 STYLE = f"""
 QLineEdit[bad="true"], QComboBox[bad="true"], QPlainTextEdit[bad="true"] {{ background: #fdecea; border: 1px solid {RED}; }}
 QLabel#issues {{ color: {RED}; }}
@@ -276,7 +275,8 @@ class BookEditor(QWidget):
         self.fields["notes"] = notes
         form.addRow("Your notes", notes)
 
-        self.save_btn = QPushButton("Save  (Ctrl+S)")
+        self.save_btn = QPushButton("Save / looks right  (Ctrl+S)")
+        self.save_btn.setToolTip("Saves your changes. With nothing missing, this also marks the book as checked.")
         self.save_btn.clicked.connect(self.save)
         self.next_btn = QPushButton("Save && next  (Ctrl+Enter)")
         self.next_btn.clicked.connect(lambda: self.save() and self.save_and_next.emit())
@@ -327,8 +327,9 @@ class BookEditor(QWidget):
     def _condition_box(empty_label: str) -> QComboBox:
         box = QComboBox()
         box.addItem(empty_label, "")
-        for c in CONDITION_ORDER:
-            box.addItem(c.replace("_", " "), c)
+        for code, zh, en, meaning in CONDITION_GRADES:
+            box.addItem(f"{zh}  {en}", code)
+            box.setItemData(box.count() - 1, meaning, Qt.ItemDataRole.ToolTipRole)
         return box
 
     # -- showing a book --
@@ -366,9 +367,14 @@ class BookEditor(QWidget):
         if issues:
             self.issues.setText("<ul style='margin:0'>" + "".join(f"<li>{html.escape(i['msg'])}</li>" for i in issues) + "</ul>")
             self.status.setText(f"<span style='color:{RED}'>{len(issues)} thing(s) to fix</span>")
+        elif row.get("to_check"):
+            self.issues.setText(f"<span style='color:{AMBER}'>Nothing missing. Quick check: are the photos the same "
+                                "book, and are title, condition and price right? Then press Save (Ctrl+Enter = "
+                                "save and go to the next one).</span>")
+            self.status.setText(f"<span style='color:{AMBER}'>To check</span>")
         else:
             self.issues.setText("")
-            self.status.setText(f"<span style='color:{GREEN}'>Ready</span>")
+            self.status.setText(f"<span style='color:{GREEN}'>Checked - ready for listing</span>")
 
     def _show_photos(self, row: dict) -> None:
         while self.photos.count():
@@ -446,7 +452,7 @@ class BookEditor(QWidget):
             return False
         self.load(stored)
         left = len(stored["issues"])
-        self.message.setText("Saved - ready!" if not left else f"Saved - still {left} thing(s) to fix")
+        self.message.setText("Saved - checked and ready!" if not left else f"Saved - still {left} thing(s) to fix")
         self.saved.emit(stored)
         return True
 
@@ -599,7 +605,7 @@ class ReviewWindow(QMainWindow):
         self.addToolBar(bar)
         self.count = QLabel("")
         self.count.setStyleSheet("font-weight: 600; padding: 0 12px;")
-        self.show_all = QCheckBox("Show finished books too")
+        self.show_all = QCheckBox("Show checked books too")
         self.show_all.toggled.connect(lambda _: self.reload())
         refresh = QPushButton("Refresh")
         refresh.clicked.connect(lambda: self.reload())
@@ -665,7 +671,7 @@ class ReviewWindow(QMainWindow):
         for r in self.rows:
             item = QListWidgetItem(self._item_text(r))
             item.setData(Qt.ItemDataRole.UserRole, r["sku"])
-            item.setIcon(dot_icon(RED if r["issues"] else GREEN))
+            item.setIcon(dot_icon(self._colour(r)))
             self.list.addItem(item)
             if r["sku"] == keep:
                 select = item
@@ -679,19 +685,26 @@ class ReviewWindow(QMainWindow):
         else:
             self.editor.row = {}
             self.editor.setEnabled(False)
-            self.editor.heading.setText("Nothing left to fix - press 'Make listings'" if not self.show_all.isChecked()
+            self.editor.heading.setText("Nothing left to check - press 'Make listings'" if not self.show_all.isChecked()
                                         else "No books yet")
+
+    @staticmethod
+    def _colour(r: dict) -> str:
+        return RED if r["issues"] else AMBER if r.get("to_check") else GREEN
 
     @staticmethod
     def _item_text(r: dict) -> str:
         where = f"{r['set_id']} #{r['position']}" if r.get("set_id") else r["sku"]
         name = r.get("title") or r.get("isbn13") or "(unknown book)"
-        state = f"{len(r['issues'])} to fix" if r["issues"] else "ready"
+        state = f"{len(r['issues'])} to fix" if r["issues"] else "quick check" if r.get("to_check") else "checked"
         return f"{where}   {name[:34]}\n      {state}"
 
     def _update_count(self) -> None:
         red = sum(1 for r in self.rows if r["issues"])
-        self.count.setText(f"{red} book(s) need attention" if red else "Nothing left to fix")
+        amber = sum(1 for r in self.rows if not r["issues"] and r.get("to_check"))
+        parts = [f"{red} to fix"] if red else []
+        parts += [f"{amber} to check"] if amber else []
+        self.count.setText(", ".join(parts) if parts else "Nothing left to check")
 
     def _ask_save(self) -> bool:
         """The current book has unsaved edits: Save / Discard / Cancel. Returns False on Cancel."""
@@ -729,7 +742,7 @@ class ReviewWindow(QMainWindow):
             item = self.list.item(i)
             if item.data(Qt.ItemDataRole.UserRole) == stored["sku"]:
                 item.setText(self._item_text(stored))
-                item.setIcon(dot_icon(RED if stored["issues"] else GREEN))
+                item.setIcon(dot_icon(self._colour(stored)))
         self._csv_mtime = self._mtime()   # our own save is not 'new data'
         self._update_count()
 
@@ -740,7 +753,7 @@ class ReviewWindow(QMainWindow):
         for step in range(1, n + 1):
             i = (start + step) % n
             sku = self.list.item(i).data(Qt.ItemDataRole.UserRole)
-            if any(r["sku"] == sku and r["issues"] for r in self.rows):
+            if any(r["sku"] == sku and (r["issues"] or r.get("to_check")) for r in self.rows):
                 self.list.setCurrentRow(i)
                 return
 

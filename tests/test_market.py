@@ -140,7 +140,7 @@ def test_ingest_fills_market_price_and_your_price(tmp_path, monkeypatch):
     assert rows[0]["market_price"] == "450" and rows[0]["price"] == "180" and rows[0]["currency"] == "TWD"
     assert rows[1]["market_price"] == "450" and rows[1]["price"] == "3" and rows[1]["currency"] == "TWD"
     assert rows[1]["price_basis"] == "caption"                           # your caption price is kept as given
-    assert rows[0]["status"] == rows[1]["status"] == "validated"
+    assert rows[0]["status"] == rows[1]["status"] == "to_check"
 
 
 # ---- out-of-print books: the shop's search leaves them out, a web search finds the page ------------------------
@@ -376,19 +376,17 @@ def book_page(isbn, title, author, price, year, ebook=False):
             f"<ul><li>ISBN：{isbn}</li></ul></body></html>")
 
 
-def test_ebook_with_our_isbn_is_used_when_no_printed_copy_exists(tmp_path, fake):  # noqa: F811
+def test_ebooks_and_audiobooks_are_never_used(tmp_path, fake):  # noqa: F811
     isbn = "9789866582646"
-    fake({f"search.books.com.tw/search/query/key/{isbn}": Resp(200, text=
+    s = fake({f"search.books.com.tw/search/query/key/{isbn}": Resp(200, text=
               '<a href="//www.books.com.tw/products/E050014054">我家有個花果菜園 (電子書)</a>'),
               "search.books.com.tw": Resp(200, text="<html>no results</html>"),
               "products/E050014054": Resp(200, text=book_page(isbn, "我家有個花果菜園", "陳", "280", "2010", True))})
     cfg = cfg_for(tmp_path, market_providers=("books_tw",))
-    got = market.find_market_price(isbn, "我家有個花果菜園", cfg, author="陳")
-    assert got["market_price"] == "280" and got["market_match"] == "ebook"
-    assert got["market_source"] == "books_tw (e-book, same ISBN)" and got["market_isbn"] == isbn
-    row = {"isbn13": isbn, "title": "我家有個花果菜園", "author": "陳"}
-    market.apply_market(row, cfg)
-    assert row["price"] == "112" and row["price_basis"] == "40% of 280 TWD (e-book price)"
+    assert market.find_market_price(isbn, "我家有個花果菜園", cfg, author="陳") == {}
+    assert not any("E050014054" in c[1] for c in s.calls)                 # the e-book page is not even opened
+    assert not market.is_printed("我家有個花果菜園 (有聲書)") and not market.is_printed("X", product_type="ebook")
+    assert market.is_printed("我家有個花果菜園", product_type="book")
 
 
 def test_other_edition_with_same_title_and_author(tmp_path, fake):  # noqa: F811
@@ -430,7 +428,7 @@ def test_title_steps_come_after_every_isbn_step_and_web_title_is_one_search(tmp_
 
 def test_ncl_is_asked_before_spending_a_web_search(tmp_path, fake, monkeypatch):  # noqa: F811
     from pipeline.sources import taiwan
-    monkeypatch.setattr(taiwan, "from_ncl", lambda isbn, cfg: {"list_price": "350"})
+    monkeypatch.setattr(taiwan, "from_ncl", lambda isbn, cfg, **k: {"list_price": "350"})
     s = fake({"athena.eslite.com/api/v2/search": Resp(200, {"hits": {"found": "0", "hit": []}})})
     cfg = cfg_for(tmp_path, market_providers=("eslite", "ncl"), tavily_api_key="T")
     got = market.find_market_price(OOP, "T", cfg)
@@ -495,3 +493,14 @@ def test_search_box_gets_the_volume_name():
     assert search_title("神奇樹屋. 44, 狄更斯的耶誕頌") == "狄更斯的耶誕頌"
     assert search_title("被討厭的勇氣: 自我啟發之父阿德勒的教導") == "被討厭的勇氣"
     assert search_title("衝業績一定有效的10種態度: 突破1個客戶, 等於增加250筆生意") == "衝業績一定有效的10種態度"
+
+
+def test_ncl_price_comes_before_the_shops(tmp_path, fake, monkeypatch):  # noqa: F811
+    from pipeline.sources import taiwan
+    seen = []
+    monkeypatch.setattr(taiwan, "from_ncl", lambda isbn, cfg, **k: seen.append(k.get("title")) or {"list_price": "250"})
+    s = fake({"athena.eslite.com": Resp(200, {"hits": {"hit": []}})})
+    cfg = cfg_for(tmp_path, market_providers=("eslite", "books_tw", "ncl"))
+    got = market.find_market_price(OOP, "Google必修的圖表簡報術", cfg)
+    assert got["market_price"] == "250" and got["market_source"] == "ncl (registered price)"
+    assert seen == ["Google必修的圖表簡報術"] and not s.calls             # no shop asked at all
