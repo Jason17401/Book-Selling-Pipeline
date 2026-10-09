@@ -13,3 +13,7 @@ __pycache__/
 
 # Scratch output of `python -m pipeline orient`
 orient.jpg
+
+# Previews written by `python -m pipeline segment`
+segments.jpg
+covers_test/

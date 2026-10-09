@@ -33,7 +33,7 @@ def test_only_books_needing_attention_are_listed(cfg):
     msgs = " ".join(i["msg"] for i in rows[0]["issues"])
     assert "ISBN missing" in msgs and "Title missing" in msgs
     assert "Price missing" in msgs and "Condition missing" in msgs        # both required
-    assert [p["label"] for p in rows[0]["photos"]] == ["This book (front photo)", "Barcode photo", "Whole set"]
+    assert [p["label"] for p in rows[0]["photos"]] == ["This book (front)", "Barcode photo", "Whole set"]
     assert len(editing.list_rows(cfg, only_attention=False)) == 2
 
 
@@ -45,7 +45,7 @@ def test_condition_and_price_are_required(cfg):
     r = editing.save_row(cfg, "b-S01-06", {"condition": "like_new", "price": "150", "currency": "TWD"})
     assert r["status"] == "validated" and not r["issues"]
     rows = {x["sku"]: x for x in store.read_rows(cfg.csv_path)}
-    assert rows["b-S01-06"]["trademe_id"] == "keep-me" and "manual" in rows["b-S01-06"]["source"]
+    assert rows["b-S01-06"]["trademe_id"] == "keep-me" and "manual" in rows["b-S01-06"]["book_source"]
     assert rows["b-S01-05"]["title"] == "Done"                              # other book untouched
 
 

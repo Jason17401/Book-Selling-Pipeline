@@ -126,7 +126,7 @@ def enrich_rows(rows: list, cfg: Config, lookup: Callable = lookup_book) -> int:
             for k in ("title", "author", "publisher", "year", "pages", "genre"):
                 if not r.get(k):
                     r[k] = meta.get(k, "")
-            r["source"] = r.get("source") or meta.get("source", "")
+            r["book_source"] = r.get("book_source") or meta.get("source", "")
         if cfg.market_providers:
             from ..sources.market import apply_market
             apply_market(r, cfg)

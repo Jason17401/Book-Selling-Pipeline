@@ -26,12 +26,15 @@ def public(r: dict, cfg: Config) -> dict:
     """A book as the review window shows it: its fields, what is wrong, and which pictures to show."""
     issues = row_issues(r, cfg)
     pics = []
-    if r.get("front_photo"):
-        pics.append({"label": "This book (front photo)", "path": r["front_photo"], "pos": int(r.get("position") or 0)})
+    whole = r.get("set_photo") or r.get("front_photo")
+    if r.get("front_photo") and r["front_photo"] != whole:      # its own cover, cut out of the set photo
+        pics.append({"label": "This book (front)", "path": r["front_photo"], "pos": 0})
+    elif whole:                                                  # older books: its grid cell of the set photo
+        pics.append({"label": "This book (front)", "path": whole, "pos": int(r.get("position") or 0)})
     if r.get("barcode_photo"):
         pics.append({"label": "Barcode photo", "path": r["barcode_photo"], "pos": 0})
-    if r.get("front_photo"):
-        pics.append({"label": "Whole set", "path": r["front_photo"], "pos": 0})
+    if whole:
+        pics.append({"label": "Whole set", "path": whole, "pos": 0})
     done = r.get("status") in DONE
     to_check = not issues and not done and r.get("status") != "validated"
     return {**{k: r.get(k, "") for k in store.COLUMNS}, "issues": issues, "photos": pics,
@@ -95,8 +98,8 @@ def save_row(cfg: Config, sku: str, fields: dict) -> dict:
             r["market_currency"] = "TWD"
         if r.get("price") and not r.get("currency"):
             r["currency"] = cfg.default_currency
-        if changed and "manual" not in (r.get("source") or ""):
-            r["source"] = "+".join(x for x in (r.get("source"), "manual") if x)
+        if changed and "manual" not in (r.get("book_source") or ""):
+            r["book_source"] = "+".join(x for x in (r.get("book_source"), "manual") if x)
         refresh_status(r, cfg, confirm=True)      # saving in the review window = you checked it
         return r
     return public(store.update_rows(cfg.csv_path, change), cfg)

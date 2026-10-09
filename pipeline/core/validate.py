@@ -44,7 +44,7 @@ STATUSES = ("needs_manual", "enriched", "to_check", "validated", "listed", "sold
 
 
 def photos_of(row: dict) -> list:
-    return [p for p in (row.get("front_photo"), row.get("barcode_photo")) if p]
+    return list(dict.fromkeys(p for p in (row.get("front_photo"), row.get("set_photo"), row.get("barcode_photo")) if p))
 
 
 def row_issues(r: dict, cfg: Config) -> list:

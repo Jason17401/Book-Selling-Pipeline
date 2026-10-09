@@ -632,22 +632,25 @@ def forget_market(row: dict) -> None:
         row[k] = ""
 
 
-def apply_market(row: dict, cfg: Config, use_cache: bool = True, reprice: bool = False) -> list:
+def from_barcode(row: dict) -> bool:
+    """True if the row's market price was read from the price barcode printed on the book itself."""
+    return (row.get("market_source") or "").startswith("barcode")
+
+
+def apply_market(row: dict, cfg: Config, use_cache: bool = True, reprice: bool = False, addon: str = "") -> list:
     """Fill the row's market_* fields (if missing) and its price (if empty, or if reprice and the price was auto-set).
-    Returns problems as text (never raises)."""
+    `addon` = the 5-digit price barcode read next to the ISBN barcode (when processing the photos); it is used
+    straight away and not stored - the price it gives is (market_source "barcode ..."), and a market price from the
+    barcode is kept when the market price is searched again later. Returns problems as text (never raises)."""
     problems = []
-    printed = addon_price(row.get("barcode_addon", ""), row.get("isbn13", "")) if "barcode" in cfg.market_providers \
-        else None
-    if (row.get("market_source") or "").startswith("barcode") and \
-            (row.get("market_price"), row.get("market_currency")) != (printed or (None, None)):
-        forget_market(row)        # read with an older rule (e.g. the wrong currency): read it again below
-    if printed and (not row.get("market_price") or row.get("market_match") == "similar"):
+    printed = addon_price(addon, row.get("isbn13", "")) if addon and "barcode" in cfg.market_providers else None
+    if printed and (row.get("market_price"), row.get("market_currency")) != printed:
         # FIRST choice: the price printed on this very copy (beats everything, even a price found online)
         if row.get("market_price"):
             forget_market(row)
         row["market_price"], row["market_currency"] = printed
         row["market_source"], row["market_url"] = "barcode (price printed on the book)", ""
-        row["market_match"], row["market_isbn"] = "exact", row.get("isbn13", "")
+        row["market_match"], row["market_isbn"] = "exact", ""      # the book itself: no other edition/ISBN involved
     if not row.get("market_price"):
         got = find_market_price(row.get("isbn13", ""), row.get("title", ""), cfg, use_cache,
                                 author=row.get("author", ""))

@@ -118,7 +118,9 @@ def test_process_sets_end_to_end(tmp_path):
     set_dir = cfg.processed / s.batch / "S01"
     assert (set_dir / "front.jpg").exists() and (set_dir / "review.jpg").exists()
     assert sorted(p.name for p in set_dir.iterdir() if p.is_dir()) == [f"{i:02d}" for i in range(1, 11)]
-    assert Path(rows[0]["front_photo"]) == set_dir / "front.jpg" and Path(rows[0]["barcode_photo"]).parent.name == "01"
+    assert Path(rows[0]["set_photo"]) == set_dir / "front.jpg" and Path(rows[0]["barcode_photo"]).parent.name == "01"
+    assert Path(rows[0]["front_photo"]) == set_dir / "01" / "cover.jpg" and Path(rows[0]["front_photo"]).exists()
+    assert (set_dir / "segments.json").exists()
     assert not list(cfg.inbox.iterdir())                      # nothing left behind
     assert len(seen) == 9
 

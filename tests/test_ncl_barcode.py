@@ -76,31 +76,47 @@ def test_barcode_price_comes_first(tmp_path, monkeypatch):
     called = []
     monkeypatch.setattr(market, "find_market_price", lambda *a, **k: called.append(1) or {})
     cfg = Config(data_dir=tmp_path, market_providers=("barcode", "eslite"))
-    row = {"isbn13": "9781862305717", "title": "A Wild West Ride", "barcode_addon": "50399"}
-    market.apply_market(row, cfg)
+    row = {"isbn13": "9781862305717", "title": "A Wild West Ride"}
+    market.apply_market(row, cfg, addon="50399")
     assert not called                                                     # no website asked at all
     assert row["market_price"] == "3.99" and row["market_currency"] == "USD" and row["market_match"] == "exact"
     assert row["market_source"] == "barcode (price printed on the book)"
+    assert row["market_isbn"] == "" and "barcode_addon" not in row          # nothing else to note
     assert row["price"] == "1.5" and row["currency"] == "USD"            # 40% of 3.99, rounded to 0.5
 
 
-def test_barcode_beats_shops_and_old_wrong_barcode_prices_are_redone(tmp_path, monkeypatch):
+def test_barcode_beats_shops_and_is_kept_on_later_searches(tmp_path, monkeypatch):
     shop = {"market_price": "999", "market_currency": "TWD", "market_source": "eslite (isbn)", "market_url": "u"}
     monkeypatch.setattr(market, "find_market_price", lambda *a, **k: dict(shop))
     cfg = Config(data_dir=tmp_path, market_providers=("barcode", "eslite"))
-    # saved by an older version: the NT$ add-on read as British pounds, and a price worked out from that
-    row = {"isbn13": ISBN, "title": "T", "barcode_addon": "00420", "market_price": "4.20", "market_currency": "GBP",
-           "market_source": "barcode (price printed on the book)", "price": "1.5", "currency": "GBP",
-           "price_basis": "40% of 4.20 GBP"}
-    market.apply_market(row, cfg)
+    row = {"isbn13": ISBN, "title": "T"}
+    market.apply_market(row, cfg, addon="00420")
     assert row["market_price"] == "420" and row["market_currency"] == "TWD" and row["market_source"].startswith("barcode")
     assert row["price"] == "168" and row["currency"] == "TWD"
-    # another edition's price is replaced by the price printed on this copy; a price YOU typed is never touched
-    row = {"isbn13": ISBN, "barcode_addon": "00420", "market_price": "300", "market_match": "similar",
-           "price": "9", "price_basis": "manual"}
+    # searching again later (python -m pipeline market): the price printed on the book stays, no shop is asked
     market.apply_market(row, cfg)
+    assert row["market_price"] == "420" and row["market_source"].startswith("barcode")
+    assert market.from_barcode(row) and not market.from_barcode({"market_source": "eslite (isbn)"})
+    # another edition's price is replaced by the price printed on this copy; a price YOU typed is never touched
+    row = {"isbn13": ISBN, "market_price": "300", "market_match": "similar", "market_isbn": "9789860000000",
+           "price": "9", "price_basis": "manual"}
+    market.apply_market(row, cfg, addon="00420")
     assert row["price"] == "9" and row["market_price"] == "420" and row["market_match"] == "exact"
+    assert row["market_isbn"] == ""
     # no price barcode: the shops are asked
     row = {"isbn13": ISBN, "title": "T"}
     market.apply_market(row, cfg)
     assert row["market_price"] == "999"
+
+
+def test_old_rows_are_upgraded(tmp_path):
+    from pipeline.core import store
+    path = tmp_path / "books.csv"
+    path.write_text("sku,isbn13,source,barcode_addon,market_source,market_isbn\n"
+                    f"a,{ISBN},google+ncl,00250,barcode (price printed on the book),{ISBN}\n", encoding="utf-8")
+    row = store.read_rows(path)[0]
+    assert row["book_source"] == "google+ncl" and "source" not in row      # renamed
+    assert row["market_isbn"] == ""                                       # priced from the book itself
+    store.write_rows(path, [row])
+    header = path.read_text(encoding="utf-8-sig").splitlines()[0].split(",")
+    assert "book_source" in header and "source" not in header and "barcode_addon" not in header

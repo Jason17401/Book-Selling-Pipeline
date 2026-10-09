@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import shutil
+from pathlib import Path
 from collections import OrderedDict
 
 from PIL import Image, ImageOps
@@ -85,7 +86,7 @@ def make_set_description(books: list, set_price: str = "", show_market: bool = F
 
 
 def build_set_listings(rows: list, cfg: Config, grid=None, set_price=None, set_currency: str = "",
-                       with_backs=False, force=False, numbers: bool = True) -> dict:
+                       with_backs=False, force=False, numbers: bool = True, with_covers: bool = True) -> dict:
     """set_price given: one price for the whole bundle. Otherwise each book's own price is shown (if it has one)."""
     out = {"made": [], "skipped": []}
     for (batch, set_id), books in set_groups(rows).items():
@@ -94,7 +95,7 @@ def build_set_listings(rows: list, cfg: Config, grid=None, set_price=None, set_c
         if bad:
             out["skipped"].append((key, f"book(s) {', '.join(bad)} not complete yet"))
             continue
-        front = books[0].get("front_photo")
+        front = books[0].get("set_photo") or books[0].get("front_photo")
         if not front:
             out["skipped"].append((key, "no front photo for this set"))
             continue
@@ -105,13 +106,23 @@ def build_set_listings(rows: list, cfg: Config, grid=None, set_price=None, set_c
         d.mkdir(parents=True, exist_ok=True)
         try:
             img = ImageOps.exif_transpose(Image.open(front)).convert("RGB")
-            (numbered(img, *(grid or cfg.grid), region=cfg.region) if numbers else img).save(d / "01_front.jpg",
-                                                                                              quality=92)
+            from ..photos.segment import load_segments
+            segs = None if grid else load_segments(Path(front).with_name("segments.json"), img.size)
+            boxes = [sg.box for sg in segs] if segs else None
+            (numbered(img, *(grid or cfg.grid), region=cfg.region, boxes=boxes) if numbers else img).save(
+                d / "01_front.jpg", quality=92)
         except Exception as exc:
             shutil.rmtree(d, ignore_errors=True)
             out["skipped"].append((key, f"front photo unreadable: {exc}"))
             continue
         files = ["01_front.jpg"]
+        if with_covers:
+            for b in books:
+                own = b.get("front_photo")
+                if own and own != front and Path(own).exists():
+                    dst = d / f"{len(files) + 1:02d}_book{int(b['position']):02d}_cover.jpg"
+                    stamp_number(own, dst, int(b["position"]))
+                    files.append(dst.name)
         if with_backs:
             for b in books:
                 dst = d / f"{len(files) + 1:02d}_book{int(b['position']):02d}_barcode.jpg"

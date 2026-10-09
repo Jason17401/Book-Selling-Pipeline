@@ -52,10 +52,10 @@
   <!-- automatic lane -->
   <g>
     <rect x="60" y="296" width="250" height="132" rx="10" fill="#ffffff" stroke="#86efac"/>
-    <text x="78" y="324" class="title">Read barcodes</text>
-    <text x="78" y="350" class="body">photo -> ISBN</text>
-    <text x="78" y="372" class="body">split photos into sets</text>
-    <text x="78" y="394" class="body">by counting (1 + 10)</text>
+    <text x="78" y="324" class="title">Read the photos</text>
+    <text x="78" y="350" class="body">barcode -> ISBN</text>
+    <text x="78" y="372" class="body">front photo -> each</text>
+    <text x="78" y="394" class="body">book's cover, cut out</text>
   </g>
   <g>
     <rect x="345" y="296" width="250" height="132" rx="10" fill="#ffffff" stroke="#86efac"/>
@@ -95,8 +95,8 @@
     <rect x="640" y="502" width="500" height="94" rx="10" fill="#ffffff" stroke="#fdba74"/>
     <circle cx="664" cy="526" r="13" fill="#ea580c"/><text x="664" y="531" class="step" text-anchor="middle">5</text>
     <text x="686" y="532" class="title">Make listings</text>
-    <text x="658" y="558" class="body">per finished set: numbered front photo +</text>
-    <text x="658" y="578" class="body">listing.txt (every book, condition, price)</text>
+    <text x="658" y="558" class="body">per finished set: numbered set photo, each</text>
+    <text x="658" y="578" class="body">book's cover, listing.txt with prices</text>
   </g>
   <path class="flow" d="M1027,428 C1027,462 320,452 320,498"/>
   <path class="flow" d="M580,549 L636,549"/>

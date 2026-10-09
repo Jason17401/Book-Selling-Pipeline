@@ -12,8 +12,8 @@ from typing import Callable
 COLUMNS = [
     "sku", "batch", "set_id", "position", "isbn13", "title", "author", "publisher", "year", "pages", "genre",
     "condition", "price", "currency", "price_basis",
-    "market_price", "market_currency", "market_source", "market_url", "market_match", "market_isbn", "barcode_addon", "front_photo", "barcode_photo",
-    "status", "errors", "source", "created_at", "trademe_id", "ebay_id", "fb_status", "notes",
+    "market_price", "market_currency", "market_source", "market_url", "market_match", "market_isbn", "front_photo", "set_photo",
+    "barcode_photo", "status", "errors", "book_source", "created_at", "trademe_id", "ebay_id", "fb_status", "notes",
 ]
 # status: needs_manual -> enriched -> validated -> listed -> sold   (meanings: pipeline/core/validate.py and README)
 
@@ -90,8 +90,14 @@ def _upgrade(r: dict) -> dict:
         r["price"], r["currency"] = r["price_nzd"], r.get("currency") or "NZD"
     if not r.get("barcode_photo") and r.get("back_crop"):
         r["barcode_photo"] = r["back_crop"]
+    if not r.get("set_photo") and r.get("front_photo"):   # older rows: front_photo WAS the whole-set photo
+        r["set_photo"] = r["front_photo"]
     if r.get("condition") == "acceptable":       # renamed to the Taiwanese grade 普通 = fair
         r["condition"] = "fair"
+    if "source" in r and not r.get("book_source"):   # renamed: where the book's details came from
+        r["book_source"] = r.pop("source") or ""
+    if (r.get("market_source") or "").startswith("barcode"):   # priced from the book itself: no ISBN to note
+        r["market_isbn"] = ""
     return r
 
 

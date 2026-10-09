@@ -3,7 +3,8 @@
     photo 1      : front covers of the whole set (GRID, e.g. 2x5)
     photos 2..11 : barcode photo of book 1, 2, ... 10 - top row left to right, then the next row left to right
 
-Each book in books.csv keeps two photos: front_photo (the whole set, shared) and barcode_photo (its own back cover).
+Each book in books.csv keeps: front_photo (its OWN cover, cut out of the set's front photo - see segment.py),
+set_photo (the whole set's front photo, shared) and barcode_photo (its own back cover).
 
 Sets are found by counting, in send order: 1 front + SET_SIZE barcode photos. A barcode that cannot be read is still
 that book (marked needs_manual, you type its ISBN in), so one bad photo never shifts the books after it.
@@ -237,12 +238,31 @@ def process_sets(cfg: Config, decode: Callable = None, lookup: Callable = lookup
                 w = orientation_warning(front_img, rows_n, cols_n, "Front", cfg.region)
                 if w:
                     s.warnings.append(f"{set_id}: {w}")
+        segs = None
+        if front_img is not None:   # find each book on the front photo -> its own cover picture
+            from .segment import find_books, save_segments
+            live.step("barcodes", f"{set_id}: finding each book on the front photo")
+            segs = find_books(front_img, cfg.grid, cfg.region, cfg.segment)
+            save_segments(set_dir / "segments.json", front_img.size, segs)
+            lost = [i + 1 for i, sg in enumerate(segs[:len(ss.books)]) if not sg.found]
+            if lost and cfg.segment == "auto":
+                s.warnings.append(f"{set_id}: book(s) {', '.join(map(str, lost))} not clearly found on the front "
+                                  "photo - their cover picture is the plain grid cell. Check it in the review window.")
         unread = 0
         set_rows = []
         for pos, book in enumerate(ss.books, 1):
             book_dir = set_dir / f"{pos:02d}"
             sidecars = [_sidecar(p) for p in book.photos]
             placed = [_place(p, book_dir, 0) for p in book.photos]     # barcode photos are kept as sent
+            cover_path = None
+            if segs is not None and pos <= len(segs):
+                from .segment import cut_book
+                try:
+                    book_dir.mkdir(parents=True, exist_ok=True)
+                    cover_path = book_dir / "cover.jpg"
+                    cut_book(front_img, segs[pos - 1], cfg.segment_margin, segs).save(cover_path, quality=95)
+                except Exception:
+                    cover_path = None
             b_cond, b_price, b_cur = cond, price, currency
             for side in sidecars:
                 moved_side = book_dir / side.name
@@ -270,16 +290,17 @@ def process_sets(cfg: Config, decode: Callable = None, lookup: Callable = lookup
             row = {
                 "sku": f"{s.batch}-{set_id}-{pos:02d}", "batch": s.batch, "set_id": set_id, "position": pos,
                 "isbn13": book.isbn,
-                "barcode_addon": decode_addons.get(book.isbn, "") if book.isbn else "",
                 **{k: meta.get(k, "") for k in ("title", "author", "publisher", "year", "pages", "genre")},
                 "condition": b_cond or cfg.default_condition, "price": b_price, "currency": b_cur, "price_basis": "caption" if b_price else "",
-                "front_photo": str(front_path) if front_path else "",
+                "front_photo": str(cover_path or front_path or ""),     # this book's own cover, cut from the set photo
+                "set_photo": str(front_path) if front_path else "",
                 "barcode_photo": str(placed[-1]),          # after a retake, the newest photo is the one that counts
-                "source": meta.get("source", ""), "created_at": now_iso,
+                "book_source": meta.get("source", ""), "created_at": now_iso,
             }
             if book.isbn and cfg.market_providers:
                 live.step("market", "searching the shops")
-                for problem in apply_market(row, cfg):
+                addon = decode_addons.get(book.isbn, "")     # the small price barcode, read with the ISBN
+                for problem in apply_market(row, cfg, addon=addon):
                     note_lookup_errors(s, {"_errors": [f"market price - {problem}"]})
                 if row.get("market_price"):
                     mine = f" -> your price {row['price']} {row.get('currency', '')}" if row.get("price") else ""
@@ -306,7 +327,7 @@ def process_sets(cfg: Config, decode: Callable = None, lookup: Callable = lookup
         s.rows += set_rows
         if set_rows:
             sheet = set_dir / "review.jpg"
-            make_review_sheet(front_img, set_rows, cfg.grid, cfg.region, sheet)
+            make_review_sheet(front_img, set_rows, cfg.grid, cfg.region, sheet, segs=segs)
             s.review_sheets.append(str(sheet))
     if expect is not None and len(s.rows) != expect:
         s.warnings.append(f"Expected {expect} books but made {len(s.rows)} rows.")

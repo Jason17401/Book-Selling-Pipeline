@@ -55,7 +55,6 @@ This makes a private Python environment (`.venv`) inside the folder and installs
 ```powershell
 Copy-Item .env.example .env
 ```
-
 [macOS / Linux: `cp .env.example .env`]
 
 `.env` holds your settings and keys. You fill in the Telegram part in section 2; everything else already has working
@@ -67,13 +66,10 @@ values. Each setting is explained in `.env` itself.
 python -m pip install -r requirements-dev.txt
 python -m pytest
 ```
-
 All tests should pass (they use made-up photos and no internet). Then try a real look-up:
-
 ```powershell
 python -m pipeline lookup 9789861371955
 ```
-
 It prints what each book source found for that ISBN (被討厭的勇氣).
 
 ---
@@ -89,11 +85,11 @@ and your user id into `.env`, and send it a first photo. It ends by sending you 
 
 ### 3.1 Recommended free keys (put them in `.env`)
 
-| Key                    | What it adds                                                               | How to get it                                                                                                                                                                                                                                           |
-| ---------------------- | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GOOGLE_BOOKS_API_KEY` | Google Books as a book source (1,000 look-ups a day)                       | [Google Cloud Console](https://console.cloud.google.com/): create a project → **APIs & Services → Library** → enable **Books API** → **Credentials → Create credentials → API key**. Then edit the key and under **API restrictions** choose Books API. |
-| `TAVILY_API_KEY`       | web search for books the shops' own search can't find (often out of print) | sign up at [tavily.com](https://tavily.com) - 1,000 searches a month, no credit card                                                                                                                                                                    |
-| `LANGSEARCH_API_KEY`   | a second web search, used when Tavily is used up                           | sign up at [langsearch.com](https://langsearch.com) - free daily allowance                                                                                                                                                                              |
+| Key | What it adds | How to get it |
+|---|---|---|
+| `GOOGLE_BOOKS_API_KEY` | Google Books as a book source (1,000 look-ups a day) | [Google Cloud Console](https://console.cloud.google.com/): create a project → **APIs & Services → Library** → enable **Books API** → **Credentials → Create credentials → API key**. Then edit the key and under **API restrictions** choose Books API. |
+| `TAVILY_API_KEY` | web search for books the shops' own search can't find (often out of print) | sign up at [tavily.com](https://tavily.com) - 1,000 searches a month, no credit card |
+| `LANGSEARCH_API_KEY` | a second web search, used when Tavily is used up | sign up at [langsearch.com](https://langsearch.com) - free daily allowance |
 
 Everything works without them; you just find fewer books and prices automatically. Keep keys only in `.env` - never
 paste them anywhere else.
@@ -101,20 +97,34 @@ paste them anywhere else.
 ### 3.2 Lay out and photograph your first set
 
 1. Lay the books in a grid: by default **2 rows of 5** (`GRID=2x5`, `SET_SIZE=10`). Book 1 is top-left, then left to
-   right along the row, then the next row.
-2. **Photo 1:** all the front covers together, in landscape.
+   right along the row, then the next row. Leave a small gap between books if you can, on a plain surface that
+   contrasts with the covers - each book's cover picture is cut out of this photo automatically.
+2. **Photo 1:** all the front covers together, in landscape, straight from above. Send it **as a File** (in Telegram:
+   paperclip → File) for sharp cover pictures - a normal Telegram photo is shrunk to about 1280 px.
 3. **Photos 2-11:** the back cover of each book with its barcode, in book order 1 → 10. Fill the frame, keep the
    barcode sharp and without glare. A normal photo is plenty.
 
-Send them as described in section 4, then look at the **review sheet** the bot sends back: on each row, the book cut
-from the front photo and its barcode photo must be the same book.
+Send them as described in section 4, then look at the **review sheet** the bot sends back: on each row, the book's
+cover (cut out of the front photo) and its barcode photo must be the same book.
+
+**How the covers are cut out.** The pipeline finds each book on the front photo (where it differs from the table, and
+the straight edges between books), straightens slightly turned books, and saves each one at full resolution with a
+small margin of table around it (`SEGMENT_MARGIN`, default 4% of the book's size). The shadow a book casts on the
+table (darker table, same colour, carpet texture still showing through) is not counted as book, so the cover sits in
+the middle of its picture with the same margin on every side, and the margin never reaches past halfway to the next
+book. The numbering stays the grid order,
+so book N's cover always pairs with barcode photo N. To see how a photo is cut:
+```powershell
+python -m pipeline segment path\to\front.jpg --covers covers_test
+```
+It writes `segments.jpg` with every book's box and number (green = found, orange = not clearly found, so the plain grid
+cell is used) and the cut-out covers into `covers_test`. If a layout keeps confusing it, `SEGMENT=grid` goes back to
+equal cells.
 
 If the numbers sit on the wrong books because the front photo arrives **sideways**, run this once on that photo:
-
 ```powershell
 python -m pipeline orient data\processed\<batch>\S01\front.jpg
 ```
-
 It writes `orient.jpg` with the photo turned four ways. Put the number of the upright, landscape one into `.env` as
 `ROTATE=` and restart the bot. (Only the front photo is turned; barcodes read in any direction.)
 If there is empty table around the books, `REGION` trims it - see `.env`.
@@ -139,12 +149,12 @@ Double-click **`bot.bat`** and leave its window open while you work. It shows ea
 
 **Captions** (optional, typed with a photo):
 
-| Caption                                                                                          | On the front photo                                    | On a barcode photo                                                    |
-| ------------------------------------------------------------------------------------------------ | ----------------------------------------------------- | --------------------------------------------------------------------- |
-| a condition: `全新` `近全新` `良好` `普通` `差強人意` (or `new` `like new` `good` `fair` `poor`) | condition of every book in the set                    | condition of that book                                                |
-| condition + price: `良好 150`, `good 150 TWD`                                                    | condition + price for every book                      | condition + price for that book                                       |
-| `retake`                                                                                         | -                                                     | replaces the previous barcode photo (send it right after the bad one) |
-| `front`                                                                                          | starts a new set early (a set of fewer than 10 books) | -                                                                     |
+| Caption | On the front photo | On a barcode photo |
+|---|---|---|
+| a condition: `全新` `近全新` `良好` `普通` `差強人意` (or `new` `like new` `good` `fair` `poor`) | condition of every book in the set | condition of that book |
+| condition + price: `良好 150`, `good 150 TWD` | condition + price for every book | condition + price for that book |
+| `retake` | - | replaces the previous barcode photo (send it right after the bad one) |
+| `front` | starts a new set early (a set of fewer than 10 books) | - |
 
 Without a caption, books are 近全新 (`like_new`) and priced from the market price. The grades are explained in
 [section 6.1](#61-condition-grades).
@@ -178,18 +188,19 @@ the green ones again.
 ### 4.5 Make listings
 
 When every book of a set is green (checked), press **Make listings for finished sets**. Each set gets a folder in `data\listings\sets`
-with the numbered front photo and `listing.txt` (every book with its number, condition and price). Post them, then
+with the numbered front photo, each book's own cover with its number (`--no-covers` on the command line leaves them
+out) and `listing.txt` (every book with its number, condition and price). Post them, then
 set those books' `status` to `listed` (and later `sold`).
 
 ### 4.6 Bot commands
 
-| Command             | What it does                                                                    |
-| ------------------- | ------------------------------------------------------------------------------- |
-| `/start` or `/help` | how to send photos, and your Telegram user id                                   |
-| `/status`           | where you are: which set, how many barcode photos saved                         |
-| `/undo`             | removes the last photo you sent                                                 |
-| `/process`          | processes every photo sent so far (`/process 20` also checks you sent 20 books) |
-| `/todo`             | which books still need fixing, and how many just need a quick check             |
+| Command | What it does |
+|---|---|
+| `/start` or `/help` | how to send photos, and your Telegram user id |
+| `/status` | where you are: which set, how many barcode photos saved |
+| `/undo` | removes the last photo you sent |
+| `/process` | processes every photo sent so far (`/process 20` also checks you sent 20 books) |
+| `/todo` | which books still need fixing, and how many just need a quick check |
 
 ---
 
@@ -204,7 +215,7 @@ over English ones, so a book Google only knows in English is looked up further. 
 
 - **NCL** (國家圖書館 全國新書資訊網, Taiwan's ISBN agency) is searched by ISBN in its catalogue. When the title in the
   result is a link, the full record behind it gives the registered price (定價) and the subject heading (主題標題).
-- **Genre** is stored as _overarching > most specific_, e.g. `童書 > 冒險／驚悚小說`: from NCL's subject heading,
+- **Genre** is stored as *overarching > most specific*, e.g. `童書 > 冒險／驚悚小說`: from NCL's subject heading,
   eslite's category levels, books.com.tw's 本書分類 / breadcrumb, or Google's category. Navigation steps that are not
   genres (首頁, 中文書, the book's own title ...) are left out.
 
@@ -231,19 +242,21 @@ caption is never changed automatically.
 Everything lives in **`data\books.csv`** (one row per book). Edit it with the review window rather than Excel - Excel
 turns ISBNs into `9.78E+12` and locks the file.
 
-| Column                                                                                 | Meaning                                                                            |
-| -------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| `sku`, `batch`, `set_id`, `position`                                                   | unique id; when it was processed; set (S01, S02 ...); number in the set (1-10)     |
-| `isbn13`, `title`, `author`, `publisher`, `year`, `pages`                              | the book                                                                           |
-| `genre`                                                                                | e.g. `童書 > 冒險／驚悚小說` (overarching > most specific)                         |
-| `condition`                                                                            | one of the five grades below (required)                                            |
-| `price`, `currency`, `price_basis`                                                     | your price (required) and how it was set: `40% of 300 TWD`, `caption` or `manual`  |
-| `market_price`, `market_currency`                                                      | list price of a new copy                                                           |
-| `market_source`, `market_url`                                                          | where it was found, and the page to check it                                       |
-| `market_match`, `market_isbn`                                                          | `exact`, `similar` (another printed edition) or `manual`; the ISBN that was priced |
-| `front_photo`, `barcode_photo`                                                         | the set's front photo and this book's barcode photo                                |
-| `status`, `errors`                                                                     | see below; `errors` names what is still missing                                    |
-| `source`, `notes`, `created_at`, `trademe_id`, `ebay_id`, `fb_status`, `barcode_addon` | bookkeeping                                                                        |
+| Column | Meaning |
+|---|---|
+| `sku`, `batch`, `set_id`, `position` | unique id; when it was processed; set (S01, S02 ...); number in the set (1-10) |
+| `isbn13`, `title`, `author`, `publisher`, `year`, `pages` | the book |
+| `genre` | e.g. `童書 > 冒險／驚悚小說` (overarching > most specific) |
+| `condition` | one of the five grades below (required) |
+| `price`, `currency`, `price_basis` | your price (required) and how it was set: `40% of 300 TWD`, `caption` or `manual` |
+| `market_price`, `market_currency` | list price of a new copy |
+| `market_source`, `market_url` | where it was found, and the page to check it |
+| `market_match`, `market_isbn` | `exact`, `similar` (another printed edition) or `manual`; the ISBN of the edition priced online (blank when the price came from the price barcode on the book itself) |
+| `front_photo` | this book's own cover, cut out of the set's front photo (`data\processed\<batch>\S01\01\cover.jpg`) |
+| `set_photo`, `barcode_photo` | the whole set's front photo, and this book's barcode photo |
+| `status`, `errors` | see below; `errors` names what is still missing |
+| `book_source` | where the book's details (title, author, publisher, year, genre ...) came from, e.g. `google+ncl`; `+manual` once you changed them in the review window. The market price's origin is `market_source`. |
+| `notes`, `created_at`, `trademe_id`, `ebay_id`, `fb_status` | bookkeeping |
 
 ### 6.1 Condition grades
 
@@ -251,25 +264,25 @@ The five grades used by [TAAZE 讀冊生活](https://www.taaze.tw/), Taiwan's la
 buyers know them. Listings show the Chinese name. The descriptions are a practical guide in the spirit of those
 grades (TAAZE's staff judge each book; they don't publish exact rules).
 
-| Grade                           | Code       | Means                                                                                                                                    |
-| ------------------------------- | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| **全新** New                    | `new`      | Unread. No marks, wear or yellowing; looks as it did in the shop.                                                                        |
-| **近全新** Like new _(default)_ | `like_new` | Read carefully once or twice. No writing or highlighting; at most tiny shelf wear on edges or corners.                                   |
-| **良好** Good                   | `good`     | Clearly read, but clean and complete: light wear on cover/corners or slight yellowing; no or very little writing.                        |
-| **普通** Fair                   | `fair`     | Obvious wear: creases, yellowing, foxing (書斑), some writing or highlighting, a name on the first page. All pages present and readable. |
-| **差強人意** Poor               | `poor`     | Heavy wear: lots of writing, water marks, loose or damaged pages or cover. Readable, priced as such.                                     |
+| Grade | Code | Means |
+|---|---|---|
+| **全新** New | `new` | Unread. No marks, wear or yellowing; looks as it did in the shop. |
+| **近全新** Like new *(default)* | `like_new` | Read carefully once or twice. No writing or highlighting; at most tiny shelf wear on edges or corners. |
+| **良好** Good | `good` | Clearly read, but clean and complete: light wear on cover/corners or slight yellowing; no or very little writing. |
+| **普通** Fair | `fair` | Obvious wear: creases, yellowing, foxing (書斑), some writing or highlighting, a name on the first page. All pages present and readable. |
+| **差強人意** Poor | `poor` | Heavy wear: lots of writing, water marks, loose or damaged pages or cover. Readable, priced as such. |
 
 Books saved earlier as `acceptable` become `fair` automatically.
 
 ### 6.2 Statuses
 
-| Status           | Review window      | Meaning                                                                      |
-| ---------------- | ------------------ | ---------------------------------------------------------------------------- |
-| `needs_manual`   | red: to fix        | not identified yet: barcode unreadable, ISBN wrong, or no title/author found |
-| `enriched`       | red: to fix        | identified, but price or condition missing, or a value is invalid            |
-| `to_check`       | amber: quick check | complete - waiting for you to glance at it and press Save                    |
-| `validated`      | green: checked     | checked by you - goes into "Make listings"                                   |
-| `listed`, `sold` | -                  | set these yourself; the pipeline never changes them                          |
+| Status | Review window | Meaning |
+|---|---|---|
+| `needs_manual` | red: to fix | not identified yet: barcode unreadable, ISBN wrong, or no title/author found |
+| `enriched` | red: to fix | identified, but price or condition missing, or a value is invalid |
+| `to_check` | amber: quick check | complete - waiting for you to glance at it and press Save |
+| `validated` | green: checked | checked by you - goes into "Make listings" |
+| `listed`, `sold` | - | set these yourself; the pipeline never changes them |
 
 ---
 
@@ -278,35 +291,39 @@ Books saved earlier as `acceptable` become `fair` automatically.
 Run from the `Book Selling Pipeline` folder as `python -m pipeline <command>` (see 1.2). The everyday ones have
 buttons or `.bat` files; the rest are for fixing and checking.
 
-| Command                                                 | What it does                                                                                                                                                                                                                                                |
-| ------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `bot`                                                   | runs the Telegram bot (= `bot.bat`)                                                                                                                                                                                                                         |
-| `review`                                                | opens the review window (= `review.bat`)                                                                                                                                                                                                                    |
-| `todo` / `status`                                       | what still needs fixing / how many books per status                                                                                                                                                                                                         |
-| `export-sets`                                           | makes listings for finished sets (= the button). `--set-price 40 --set-currency NZD` for one bundle price, `--with-barcodes`, `--force` to redo                                                                                                             |
-| `ingest`                                                | processes `data\inbox` without the bot (photos copied there yourself)                                                                                                                                                                                       |
-| `market`                                                | finds market prices for books that have none. `--redo-similar` searches again for books priced from another edition (or an e-book, by older versions); `--reprice` recomputes automatic prices after changing `PRICE_RATIO`; `market <isbn>` tests one book |
-| `titles`                                                | gives older Taiwanese books saved with an English title their Chinese title                                                                                                                                                                                 |
-| `genres`                                                | looks up the genre of books saved before genres existed                                                                                                                                                                                                     |
-| `lookup <isbn>`                                         | shows what each book source returns for one ISBN (`--fresh` ignores the cache)                                                                                                                                                                              |
-| `check-barcode <photo>`                                 | tries to read the barcode in a photo (`--effort max` tries hardest)                                                                                                                                                                                         |
-| `orient <photo>`                                        | helps you find `ROTATE` for sideways front photos                                                                                                                                                                                                           |
-| `fill`, `enrich`, `validate`, `labels`, `quota`, `init` | bulk-fill condition/price; re-look-up books whose ISBN you typed; recheck all statuses; printable number labels; Google calls used today; show the data folders                                                                                             |
+| Command | What it does |
+|---|---|
+| `bot` | runs the Telegram bot (= `bot.bat`) |
+| `review` | opens the review window (= `review.bat`) |
+| `todo` / `status` | what still needs fixing / how many books per status |
+| `export-sets` | makes listings for finished sets (= the button). `--set-price 40 --set-currency NZD` for one bundle price, `--with-barcodes`, `--force` to redo |
+| `ingest` | processes `data\inbox` without the bot (photos copied there yourself) |
+| `market` | finds market prices for books that have none. `--redo-similar` searches again for books priced from another edition (or an e-book, by older versions); `--reprice` recomputes automatic prices after changing `PRICE_RATIO`; `market <isbn>` tests one book |
+| `titles` | gives older Taiwanese books saved with an English title their Chinese title |
+| `genres` | looks up the genre of books saved before genres existed |
+| `segment <photo>` | shows how a front photo is cut into books (`--covers folder` also saves the cut-outs) |
+| `covers` | cuts each book's own cover out of the set photo for books processed before this existed (`--redo` cuts all not-yet-listed covers again, e.g. after an update) |
+| `lookup <isbn>` | shows what each book source returns for one ISBN (`--fresh` ignores the cache) |
+| `check-barcode <photo>` | tries to read the barcode in a photo (`--effort max` tries hardest) |
+| `orient <photo>` | helps you find `ROTATE` for sideways front photos |
+| `fill`, `enrich`, `validate`, `labels`, `quota`, `init` | bulk-fill condition/price; re-look-up books whose ISBN you typed; recheck all statuses; printable number labels; Google calls used today; show the data folders |
 
 ---
 
 ## 8. Troubleshooting
 
-| Problem                                                  | What to do                                                                                            |
-| -------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| A bot reply skips a number (`barcode 6/10` after `4/10`) | a photo didn't arrive: `/undo` back to the gap, or send the missing photo again before the next one   |
-| `NOT SAVED: this file is .. MB`                          | Telegram bots can't receive files over 20 MB - send it as a normal photo                              |
-| Numbers on the review sheet are on the wrong books       | the front photo is sideways: section 3.2 (`orient`), or photos were sent out of order                 |
-| A barcode won't read                                     | type the ISBN in the review window, or test the photo with `check-barcode`                            |
-| No market price for many books                           | add a Tavily key (section 3.1); if books.com.tw blocks you, its pages are saved in `data\cache\debug` |
-| `books.csv is busy`                                      | close it in Excel / another program                                                                   |
-| The bot window shows odd characters like `←[1A`          | set `PLAIN_PROGRESS=1` in `.env`                                                                      |
-| Anything else                                            | run the step again from the command line - it prints the exact error                                  |
+| Problem | What to do |
+|---|---|
+| A bot reply skips a number (`barcode 6/10` after `4/10`) | a photo didn't arrive: `/undo` back to the gap, or send the missing photo again before the next one |
+| `NOT SAVED: this file is .. MB` | Telegram bots can't receive files over 20 MB - send it as a normal photo |
+| Numbers on the review sheet are on the wrong books | the front photo is sideways: section 3.2 (`orient`), or photos were sent out of order |
+| A cover picture is cut badly | `python -m pipeline segment <front photo>` shows the boxes; leave gaps between books, use a plainer surface, or `REGION` to ignore clutter around the books; `SEGMENT=grid` as a last resort |
+| Cover pictures are blurry | send the front photo as a File (Telegram shrinks normal photos) |
+| A barcode won't read | type the ISBN in the review window, or test the photo with `check-barcode` |
+| No market price for many books | add a Tavily key (section 3.1); if books.com.tw blocks you, its pages are saved in `data\cache\debug` |
+| `books.csv is busy` | close it in Excel / another program |
+| The bot window shows odd characters like `←[1A` | set `PLAIN_PROGRESS=1` in `.env` |
+| Anything else | run the step again from the command line - it prints the exact error |
 
 ### Updating to a new version
 
@@ -319,6 +336,10 @@ Your `.env`, `data` and `.venv` are never part of an update. With the project in
 4. `git add -A`, `git status` (check the list), `git commit -m "Update"`, `git push`.
 5. `python -m pip install -r requirements.txt`, and `git diff HEAD~1 -- .env.example` to see new or changed settings
    worth copying into your `.env`.
+
+`books.csv` from an older version is converted the first time it is saved (e.g. the column `source` became
+`book_source`; `barcode_addon` is gone). After an update that cuts covers better, `python -m pipeline covers --redo`
+cuts the covers of books not yet listed again.
 
 Settings that no longer exist are simply ignored (`SET_SPLIT`, `BACK_ROTATE`, `PHOTO_ORDER`, `GOOGLE_COUNTRY`,
 `BRAVE_API_KEY`, `MARKET_EBOOK`). If your `.env` was made from an older version, check these three - your old values

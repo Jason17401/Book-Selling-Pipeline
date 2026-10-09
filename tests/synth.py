@@ -131,3 +131,82 @@ TW_ISBNS = [with_check(p) for p in (
     "978957444444", "978986666666", "978626777777", "978957888888", "978986999999",
     "978957000111", "978986222333", "978626444555", "978957666777", "978986888999",
 )]
+
+
+def cover(size, seed: int, light: bool = False) -> Image.Image:
+    """A fake book cover: colour gradient, a picture block, title and author 'text' lines."""
+    rnd = random.Random(seed)
+    w, h = size
+    base = (rnd.randint(230, 250),) * 3 if light else tuple(rnd.randint(30, 220) for _ in range(3))
+    img = Image.new("RGB", size, base)
+    d = ImageDraw.Draw(img)
+    for y in range(h):                              # gentle vertical gradient
+        t = y / max(1, h)
+        d.line([(0, y), (w, y)], fill=tuple(int(c * (1 - 0.25 * t)) for c in base))
+    d.rectangle([int(w * 0.1), int(h * 0.35), int(w * 0.9), int(h * 0.75)],
+                fill=tuple(rnd.randint(0, 255) for _ in range(3)))
+    for i in range(3):                              # title / author lines
+        y = int(h * (0.08 + i * 0.07))
+        d.rectangle([int(w * 0.12), y, int(w * rnd.uniform(0.5, 0.88)), y + max(3, h // 40)],
+                    fill=(20, 20, 20) if light or sum(base) > 380 else (245, 245, 245))
+    d.rectangle([0, 0, w - 1, h - 1], outline=tuple(max(0, c - 40) for c in base), width=2)
+    return img
+
+
+def table_set(rows=2, cols=5, book=(330, 470), seed: int = 0, touching: bool = False, tilt: float = 0.0,
+              margin=(160, 140), light_cover: int = -1, shadow: int = 0, carpet: bool = False):
+    """A realistic front photo: books of slightly different sizes lying on a textured table, not exactly on a grid,
+    some a little turned. shadow=N: each book casts a soft shadow N px to its right (light from the left), like a
+    photo taken by a window; carpet=True: a grey textured carpet instead of a wooden table.
+    Returns (image, true boxes of each book in book order)."""
+    rnd = random.Random(seed)
+    gap = 0 if touching else 40
+    W = margin[0] * 2 + cols * book[0] + (cols - 1) * gap
+    H = margin[1] * 2 + rows * book[1] + (rows - 1) * (gap + 20)
+    if carpet:
+        import numpy as _np
+        g = _np.random.default_rng(seed)
+        base = _np.clip(125 + g.normal(0, 22, (H // 2 + 1, W // 2 + 1)), 0, 255)
+        base = _np.kron(base, _np.ones((2, 2)))[:H, :W]
+        light = _np.linspace(1.12, 0.9, H)[:, None]                 # brighter at the top, like daylight
+        rgb = _np.stack([base * 0.97, base, base * 1.0], axis=2) * light[..., None]
+        img = Image.fromarray(_np.clip(rgb, 0, 255).astype("uint8"))
+    else:
+        img = Image.new("RGB", (W, H), (150, 110, 75))
+        d = ImageDraw.Draw(img)
+        for y in range(0, H, 3):                        # wood grain
+            v = rnd.randint(-12, 12)
+            d.line([(0, y), (W, y + rnd.randint(-2, 2))], fill=(150 + v, 110 + v, 75 + v), width=3)
+    places = []
+    for i in range(rows * cols):
+        r, c = divmod(i, cols)
+        bw = int(book[0] * rnd.uniform(0.9, 1.0))
+        bh = int(book[1] * rnd.uniform(0.9, 1.0))
+        x = margin[0] + c * (book[0] + gap) + (0 if touching else rnd.randint(-10, 10)) + (book[0] - bw) // 2
+        y = margin[1] + r * (book[1] + gap + 20) + (0 if touching else rnd.randint(-10, 10)) + (book[1] - bh) // 2
+        if touching:
+            x = margin[0] + c * book[0]
+            bw = book[0]
+        places.append((x, y, bw, bh))
+    if shadow:
+        from PIL import ImageFilter
+        sm = Image.new("L", img.size, 0)
+        sd = ImageDraw.Draw(sm)
+        for x, y, bw, bh in places:
+            sd.rectangle((x + shadow, y + shadow // 3, x + bw + shadow, y + bh + shadow // 3), fill=170)
+        sm = sm.filter(ImageFilter.GaussianBlur(shadow / 3))
+        dark = img.point(lambda v: int(v * 0.45))
+        img = Image.composite(dark, img, sm)
+    boxes = []
+    for i, (x, y, bw, bh) in enumerate(places):
+        cv_ = cover((bw, bh), seed * 100 + i, light=(i == light_cover))
+        angle = tilt * (1 if i % 2 else -1) if tilt else 0.0
+        if angle:
+            rgba = cv_.convert("RGBA").rotate(angle, expand=True, resample=Image.BICUBIC)
+            px, py = x + bw // 2 - rgba.width // 2, y + bh // 2 - rgba.height // 2
+            img.paste(rgba, (px, py), rgba)
+            boxes.append((px, py, px + rgba.width, py + rgba.height))
+        else:
+            img.paste(cv_, (x, y))
+            boxes.append((x, y, x + bw, y + bh))
+    return img, boxes

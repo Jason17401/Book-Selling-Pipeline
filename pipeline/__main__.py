@@ -31,13 +31,22 @@ def main() -> None:
     p.add_argument("photo")
     p.add_argument("--save", default="orient.jpg")
     sub.add_parser("enrich", help="look up metadata for needs_manual rows where you have typed in the ISBN")
+    p = sub.add_parser("segment", help="show how a front photo is cut into books (draws the boxes; nothing is saved "
+                                         "to books.csv)")
+    p.add_argument("photo")
+    p.add_argument("--save", default="segments.jpg", help="where to write the picture with the boxes")
+    p.add_argument("--covers", help="also write each book's cover picture into this folder")
+    p = sub.add_parser("covers", help="cut each book's own cover out of the set photo for books processed before this "
+                                      "existed")
+    p.add_argument("--redo", action="store_true", help="also cut again the covers already cut (e.g. after an update "
+                                                       "that cuts them better); listed/sold books are left alone")
     sub.add_parser("genres", help="look up the genre of books saved before genres existed (or still without one)")
     sub.add_parser("titles", help="Taiwanese books saved with an English title: get the Chinese title (and redo the "
                                   "market price if it was not an exact match)")
     p = sub.add_parser("market", help="find the price of a NEW copy (eslite / books.com.tw / NCL) and fill empty prices")
     p.add_argument("isbn", nargs="?", help="just show it for one ISBN (nothing saved)")
     p.add_argument("--title", default="", help="with an ISBN: title to search by when the ISBN search finds nothing")
-    p.add_argument("--fresh", action="store_true", help="ignore cached market prices and search again")
+    p.add_argument("--fresh", action="store_true", help="ignore cached market prices and search again (a price read from the price barcode on the book is kept)")
     p.add_argument("--redo-similar", action="store_true",
                    help="search again for books whose market price came from another edition or the e-book")
     p.add_argument("--reprice", action="store_true",
@@ -55,6 +64,7 @@ def main() -> None:
     p.add_argument("--set-price", type=float, help="one price for the whole set (default: each book's own price)")
     p.add_argument("--set-currency", help="currency of --set-price (default DEFAULT_CURRENCY)")
     p.add_argument("--with-barcodes", action="store_true", help="also include each book's barcode photo, number stamped on")
+    p.add_argument("--no-covers", action="store_true", help="leave out each book's own cover picture")
     p.add_argument("--force", action="store_true")
     p = sub.add_parser("labels", help="write a printable sheet of numbers to cut out and place beside the books")
     p.add_argument("--count", type=int, default=10)
@@ -150,6 +160,61 @@ def main() -> None:
                     r.update(changed[r["sku"]])
         store.update_rows(cfg.csv_path, apply)
         print(f"enriched {n} row(s)")
+    elif a.cmd == "segment":
+        from .photos.grid import load_upright
+        from .photos.segment import cut_book, draw_segments, find_books
+        img = load_upright(a.photo, cfg.rotate)
+        segs = find_books(img, cfg.grid, cfg.region, cfg.segment)
+        draw_segments(img, segs).save(a.save, quality=90)
+        for n, sg in enumerate(segs, 1):
+            x0, y0, x1, y1 = sg.box
+            print(f"  book {n:>2}: {x1 - x0}x{y1 - y0} px at ({x0},{y0})"
+                  + (f", turned {sg.angle:+.1f} deg" if sg.angle else "") + ("" if sg.found else "  NOT FOUND (grid cell)"))
+        if a.covers:
+            from pathlib import Path as _P
+            _P(a.covers).mkdir(parents=True, exist_ok=True)
+            for n, sg in enumerate(segs, 1):
+                cut_book(img, sg, cfg.segment_margin, segs).save(_P(a.covers) / f"{n:02d}_cover.jpg", quality=95)
+        print(f"wrote {a.save}" + (f" and covers in {a.covers}" if a.covers else "")
+              + f"   (GRID={cfg.grid[0]}x{cfg.grid[1]}, SEGMENT={cfg.segment}, SEGMENT_MARGIN={cfg.segment_margin})")
+    elif a.cmd == "covers":
+        from pathlib import Path as _P
+        from .photos.decode import load_image
+        from .photos.segment import cut_book, find_books, save_segments
+        work = store.read_rows(cfg.csv_path)
+        made = {}
+        sets = {}
+        for r in work:
+            whole = r.get("set_photo") or r.get("front_photo")
+            own = r.get("front_photo") and r["front_photo"] != whole
+            cut_before = own and _P(r["front_photo"]).name == "cover.jpg"     # cut by the pipeline, not your own photo
+            if r.get("status") in ("listed", "sold") or not whole or (own and not (a.redo and cut_before)):
+                continue
+            sets.setdefault(whole, []).append(r)
+        for whole, rows_ in sets.items():
+            try:
+                img = load_image(whole)            # already turned upright when it was stored
+            except Exception as exc:
+                print(f"  {whole}: cannot open ({exc})")
+                continue
+            segs = find_books(img, cfg.grid, cfg.region, cfg.segment)
+            save_segments(_P(whole).with_name("segments.json"), img.size, segs)
+            for r in rows_:
+                pos = int(r.get("position") or 0)
+                if not 1 <= pos <= len(segs):
+                    continue
+                dst = _P(whole).parent / f"{pos:02d}" / "cover.jpg"
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                cut_book(img, segs[pos - 1], cfg.segment_margin, segs).save(dst, quality=95)
+                made[r["sku"]] = (str(dst), whole)
+            print(f"  {whole}: {sum(1 for r in rows_ if r['sku'] in made)} cover(s)")
+
+        def apply(rows):
+            for r in rows:
+                if r["sku"] in made:
+                    r["front_photo"], r["set_photo"] = made[r["sku"]]
+        store.update_rows(cfg.csv_path, apply)
+        print(f"{len(made)} book cover(s) cut out")
     elif a.cmd == "genres":
         from .sources.lookup import lookup_book
         work = store.read_rows(cfg.csv_path)
@@ -191,7 +256,8 @@ def main() -> None:
         import logging
         logging.basicConfig(level=logging.WARNING, format="%(message)s")
         logging.getLogger("pipeline.market").setLevel(logging.INFO)   # show every search tried
-        from .sources.market import MARKET_FIELDS, apply_market, describe, find_market_price, forget_market, suggest_price
+        from .sources.market import (MARKET_FIELDS, apply_market, describe, find_market_price, forget_market,
+                                     from_barcode, suggest_price)
         print(describe(cfg))
         if a.isbn:
             got = find_market_price(a.isbn, a.title, cfg, use_cache=not a.fresh)
@@ -209,7 +275,7 @@ def main() -> None:
                     continue
                 old = dict(r)
                 redo = a.redo_similar and r.get("market_match") in ("similar", "ebook")
-                if a.fresh or redo:
+                if (a.fresh or redo) and not from_barcode(r):     # the price printed on the book stays
                     forget_market(r)
                 print(f"{r['sku']}  {r['isbn13']}  {r.get('title', '')[:30]}")
                 for problem in apply_market(r, cfg, use_cache=not (a.fresh or redo), reprice=a.reprice):
@@ -261,7 +327,8 @@ def main() -> None:
         from .apps.sets import build_set_listings
         res = build_set_listings(store.read_rows(cfg.csv_path), cfg, grid=parse_grid(a.grid) if a.grid else None,
                                  set_price=a.set_price, set_currency=(a.set_currency or "").upper(),
-                                 with_backs=a.with_barcodes, force=a.force, numbers=not a.no_numbers)
+                                 with_backs=a.with_barcodes, force=a.force, numbers=not a.no_numbers,
+                                 with_covers=not a.no_covers)
         print(f"exported {len(res['made'])} set listing(s) to {cfg.listings_dir / 'sets'}")
         for key, why in res["skipped"]:
             print(f"  skipped {key}: {why}")

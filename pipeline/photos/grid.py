@@ -103,14 +103,16 @@ def _badge(draw: ImageDraw.ImageDraw, x: int, y: int, n: int, r: int) -> None:
         draw.text((x + r // 2, y + r // 2), str(n), font=font(size), fill=RED)
 
 
-def numbered(img: Image.Image, rows: int, cols: int, region=FULL) -> Image.Image:
-    """A copy of the front photo with a number badge in the corner of every book's cell."""
+def numbered(img: Image.Image, rows: int, cols: int, region=FULL, boxes=None) -> Image.Image:
+    """A copy of the front photo with a number badge in the corner of every book (its found box when `boxes` is
+    given, otherwise its grid cell)."""
     out = img.copy()
     d = ImageDraw.Draw(out)
-    box = cell_box(0, 0, rows, cols, out.size, region=region)
-    r = max(14, int(min(box[2] - box[0], box[3] - box[1]) * 0.11))
-    for n in range(1, rows * cols + 1):
-        x0, y0, x1, y1 = cell_box(*position_to_cell(n, rows, cols), rows, cols, out.size, region=region)
+    if not boxes:
+        boxes = [cell_box(*position_to_cell(n, rows, cols), rows, cols, out.size, region=region)
+                 for n in range(1, rows * cols + 1)]
+    r = max(14, int(min(min(b[2] - b[0], b[3] - b[1]) for b in boxes) * 0.11))
+    for n, (x0, y0, x1, y1) in enumerate(boxes, 1):
         _badge(d, int(x0 + (x1 - x0) * 0.04), int(y0 + (y1 - y0) * 0.04), n, r)
     return out
 
@@ -137,14 +139,26 @@ def make_orient_sheet(img: Image.Image, dst, thumb: int = 420) -> None:
     sheet.save(dst, quality=90)
 
 
-def make_review_sheet(front: Optional[Image.Image], rows: list, grid, region, dst: Path, thumb_h: int = 160) -> None:
+def book_cover(row: dict, front: Optional[Image.Image], grid, region) -> Optional[Image.Image]:
+    """This book's cover picture: its own cut-out (front_photo) when there is one, else its cell of the set photo."""
+    own = row.get("front_photo")
+    if own and own != row.get("set_photo"):
+        try:
+            return load_image(own)
+        except Exception:
+            pass
+    return crop_book(front, int(row["position"]), grid, region) if front is not None else None
+
+
+def make_review_sheet(front: Optional[Image.Image], rows: list, grid, region, dst: Path, thumb_h: int = 160,
+                      segs=None) -> None:
     """One picture to eyeball a set: the numbered front photo on top, then per book:
-    that book cut from the front photo | its barcode photo | number, ISBN, title, author.
+    that book's cover | its barcode photo | number, ISBN, title, author.
     If the two pictures on a row are not the same book, the photos were sent in the wrong order."""
     W = 1000
     top = None
     if front is not None:
-        top = numbered(front, *grid, region=region)
+        top = numbered(front, *grid, region=region, boxes=[sg.box for sg in segs] if segs else None)
         top.thumbnail((W - 20, 700))
     row_h = thumb_h + 12
     H = (top.height + 20 if top else 0) + row_h * len(rows) + 10
@@ -158,7 +172,7 @@ def make_review_sheet(front: Optional[Image.Image], rows: list, grid, region, ds
     for r in rows:
         x = 10
         pos = int(r["position"])
-        pics = [crop_book(front, pos, grid, region) if front is not None else None]
+        pics = [book_cover(r, front, grid, region)]
         try:
             pics.append(load_image(r["barcode_photo"]))
         except Exception:

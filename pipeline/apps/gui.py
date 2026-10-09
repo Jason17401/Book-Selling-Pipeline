@@ -356,7 +356,7 @@ class BookEditor(QWidget):
         self._show_issues(row)
         self._show_photos(row)
         self.dirty = False
-        self.message.setText(f"Source: {row.get('source') or '-'}")
+        self.message.setText(f"Book details from: {row.get('book_source') or '-'}")
         self._loading = False
 
     def _show_issues(self, row: dict) -> None:

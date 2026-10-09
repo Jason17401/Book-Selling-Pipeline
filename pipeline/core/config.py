@@ -56,6 +56,8 @@ class Config:
     max_price: float = 500.0
     grid: tuple = (2, 5)  # rows x cols the books are laid out in on the front photo
     region: tuple = (0.0, 0.0, 1.0, 1.0)  # left, top, right, bottom of the books as fractions of the photo (ignore blank margins)
+    segment: str = "auto"          # auto = find each book on the front photo; grid = equal cells (the old way)
+    segment_margin: float = 0.04   # table kept around each cut-out book cover, as a fraction of the book's size
     rotate: int = 0  # degrees CLOCKWISE to turn every photo so it is upright (0/90/180/270); see `orient`
     default_currency: str = "TWD"  # used when a price is given without a currency
     default_condition: str = "like_new"  # condition of a new book unless a caption says otherwise ("" = none)
@@ -141,6 +143,8 @@ class Config:
             grid=tuple(int(x) for x in e("GRID", "2x5").lower().split("x")),
             region=tuple(float(x) for x in e("REGION", "0,0,1,1").split(",")),
             rotate=rotate,
+            segment=(e("SEGMENT", "auto").strip().lower() or "auto"),
+            segment_margin=max(0.0, float(e("SEGMENT_MARGIN", "0.04") or 0)),
             default_currency=(e("DEFAULT_CURRENCY", "TWD").strip().upper() or "TWD"),
             default_condition=e("DEFAULT_CONDITION", "like_new").strip().lower(),
             market_providers=_csv(e("MARKET_PROVIDERS", "barcode,ncl,eslite,books_tw")),
@@ -175,5 +179,7 @@ class Config:
         bad_q = [q for q in cfg.google_queries if q not in ("id", "isbn", "isbn10", "plain")]
         if bad_q:
             raise SystemExit(f"GOOGLE_STEPS: unknown {', '.join(bad_q)}. Use any of: id, isbn, isbn10, plain")
+        if cfg.segment not in ("auto", "grid"):
+            raise SystemExit("SEGMENT must be auto or grid")
         cfg.apply_decode_settings()
         return cfg
