@@ -80,6 +80,23 @@ class Config:
     decode_effort: str = "normal"  # fast | normal | max
     bot_timeout: float = 30.0  # seconds the Telegram bot waits for Telegram before retrying (BOT_TIMEOUT)
     settle_seconds: int = 5  # ignore files modified in the last N seconds (still syncing)
+    # selling a set (pipeline/apps/sets.py) and Shopee (pipeline/apps/shopee.py)
+    set_discount: float = 0.0          # set price = sum of the books' prices minus this fraction (0.1 = 10% off)
+    set_weight_per_book_g: int = 300   # a set's weight when you have not weighed it: books x this
+    set_box_cm: tuple = (30, 22, 15)   # parcel size (length, width, height in cm) when not given per set
+    shopee_template: str = ""          # Shopee's bulk-upload template, saved as .xlsx (blank = data/listings/shopee/template.xlsx)
+    shopee_category_id: str = ""       # 分類代碼 of the category to list in (blank = search the template for shopee_category_name)
+    shopee_category_name: str = "二手書"
+    shopee_logistics: tuple = ("7-eleven", "全家", "萊爾富", "ok", "蝦皮店到店")   # delivery options switched on
+    shopee_days_to_ship: str = ""      # 較長備貨天數 (blank = Shopee's normal handling time)
+    shopee_max_images: int = 9
+    shopee_shop_id: str = ""           # your shop's number, to build product links (blank = links only from what you paste)
+    shopee_export_password: str = ""   # password of Shopee's order report (it is protected), to open it automatically
+    image_public_url: str = ""         # photos online at <this>/<set code>/01.jpg ... (blank = you add photos by hand)
+    s3_endpoint_url: str = ""          # S3-compatible bucket (e.g. Cloudflare R2) the photos are uploaded to
+    s3_bucket: str = ""
+    s3_access_key_id: str = ""
+    s3_secret_access_key: str = ""
 
     @property
     def inbox(self) -> Path:
@@ -102,11 +119,32 @@ class Config:
         return Path(self.data_dir) / "books.csv"
 
     @property
+    def sets_path(self) -> Path:
+        return Path(self.data_dir) / "sets.csv"
+
+    @property
+    def listings_path(self) -> Path:
+        return Path(self.data_dir) / "listings.csv"
+
+    @property
+    def shopee_dir(self) -> Path:
+        return self.listings_dir / "shopee"
+
+    @property
+    def shopee_import(self) -> Path:
+        """Put Shopee's order report / product list files here; `python -m pipeline shopee` reads them."""
+        return self.shopee_dir / "import"
+
+    @property
+    def template_path(self) -> Path:
+        return Path(self.shopee_template) if self.shopee_template else self.shopee_dir / "template.xlsx"
+
+    @property
     def cache_dir(self) -> Path:
         return Path(self.data_dir) / "cache"
 
     def ensure_dirs(self) -> None:
-        for d in (self.inbox, self.processed, self.review, self.listings_dir):
+        for d in (self.inbox, self.processed, self.review, self.listings_dir, self.shopee_import):
             d.mkdir(parents=True, exist_ok=True)
 
     def apply_decode_settings(self) -> None:
@@ -165,6 +203,22 @@ class Config:
             decode_effort=e("DECODE_EFFORT", "normal").strip().lower(),
             settle_seconds=int(e("SETTLE_SECONDS", "5")),
             bot_timeout=float(e("BOT_TIMEOUT", "30") or 30),
+            set_discount=_ratio(e("SET_DISCOUNT", "0") or "0"),
+            set_weight_per_book_g=int(float(e("SET_WEIGHT_PER_BOOK_G", "300") or 300)),
+            set_box_cm=tuple(int(float(x)) for x in (e("SET_BOX_CM", "30,22,15") or "30,22,15").split(",")[:3]),
+            shopee_template=e("SHOPEE_TEMPLATE", "").strip(),
+            shopee_category_id=e("SHOPEE_CATEGORY_ID", "").strip(),
+            shopee_category_name=e("SHOPEE_CATEGORY_NAME", "二手書").strip(),
+            shopee_logistics=_csv(e("SHOPEE_LOGISTICS", "7-ELEVEN,全家,萊爾富,OK,蝦皮店到店")),
+            shopee_days_to_ship=e("SHOPEE_DAYS_TO_SHIP", "").strip(),
+            shopee_max_images=max(2, int(e("SHOPEE_MAX_IMAGES", "9") or 9)),
+            shopee_shop_id=e("SHOPEE_SHOP_ID", "").strip(),
+            shopee_export_password=e("SHOPEE_EXPORT_PASSWORD", "").strip(),
+            image_public_url=e("IMAGE_PUBLIC_URL", "").strip().rstrip("/"),
+            s3_endpoint_url=e("S3_ENDPOINT_URL", "").strip(),
+            s3_bucket=e("S3_BUCKET", "").strip(),
+            s3_access_key_id=e("S3_ACCESS_KEY_ID", "").strip(),
+            s3_secret_access_key=e("S3_SECRET_ACCESS_KEY", "").strip(),
         )
         unknown = [p for p in cfg.providers + cfg.providers_tw if p not in ALL_PROVIDERS]
         if unknown:

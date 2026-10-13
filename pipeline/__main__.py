@@ -66,6 +66,24 @@ def main() -> None:
     p.add_argument("--with-barcodes", action="store_true", help="also include each book's barcode photo, number stamped on")
     p.add_argument("--no-covers", action="store_true", help="leave out each book's own cover picture")
     p.add_argument("--force", action="store_true")
+    p = sub.add_parser("shopee", help="sell the sets on Shopee (or double-click shopee.bat): first read Shopee's "
+                                      "files in data/listings/shopee/import (order report, product list), then make "
+                                      "the bulk-upload file for every set that is ready")
+    p.add_argument("files", nargs="*", help="Shopee files to read instead of the import folder")
+    p.add_argument("--redo", nargs="+", default=[], metavar="SET_CODE",
+                   help="put these sets into a new upload file again (e.g. Shopee rejected the last one)")
+    p.add_argument("--no-export", action="store_true", help="only read Shopee's files, make no upload file")
+    p.add_argument("--open", action="store_true", help="open the folder of the upload file afterwards")
+    p = sub.add_parser("set-status", help="change a set's status by hand, e.g. sold at a market, or back to ready "
+                                          "after you deleted it on Shopee")
+    p.add_argument("set_code", help="e.g. 20261008-153012-S01 (python -m pipeline sets lists them)")
+    p.add_argument("status", choices=["ready", "listed", "sold", "withdrawn"])
+    p.add_argument("--note", default="", help="a note to keep with the set")
+    p = sub.add_parser("shopee-link", help="save the Shopee link of a set you published (also possible in the review "
+                                           "window)")
+    p.add_argument("set_code")
+    p.add_argument("url")
+    sub.add_parser("sets", help="every set: status, price, title, and what is missing")
     p = sub.add_parser("labels", help="write a printable sheet of numbers to cut out and place beside the books")
     p.add_argument("--count", type=int, default=10)
     sub.add_parser("status", help="row counts by status")
@@ -332,6 +350,49 @@ def main() -> None:
         print(f"exported {len(res['made'])} set listing(s) to {cfg.listings_dir / 'sets'}")
         for key, why in res["skipped"]:
             print(f"  skipped {key}: {why}")
+    elif a.cmd == "shopee":
+        from .apps import shopee
+        try:
+            out = shopee.run(cfg, files=a.files or None, do_export=not a.no_export, redo=a.redo)
+        except shopee.ShopeeError as exc:
+            raise SystemExit(f"Shopee: {exc}")
+        print("\n".join(out["text"]))
+        exp = out.get("export") or {}
+        if a.open and exp.get("file"):
+            import os
+            if hasattr(os, "startfile"):
+                os.startfile(str(exp["file"].parent))       # Windows: show the upload file in Explorer
+    elif a.cmd == "set-status":
+        from .apps.sets import change_set_status, refresh_sets
+        refresh_sets(cfg)
+        try:
+            msgs = change_set_status(cfg, a.set_code, a.status, a.note)
+        except (KeyError, ValueError) as exc:
+            raise SystemExit(str(exc).strip("'\""))
+        print(f"{a.set_code}: {a.status}")
+        for m in msgs:
+            print("  TAKE DOWN:", m)
+    elif a.cmd == "shopee-link":
+        from .apps import shopee
+        try:
+            li = shopee.set_link(cfg, a.set_code, a.url)
+        except shopee.ShopeeError as exc:
+            raise SystemExit(str(exc))
+        print(f"{a.set_code}: on Shopee, item {li['shopee_item_id']}")
+    elif a.cmd == "sets":
+        from .apps.sets import SET_STATUS_HELP, refresh_sets
+        sets = refresh_sets(cfg)
+        for st in SET_STATUS_HELP:
+            mine = [x for x in sets if x["status"] == st]
+            if not mine:
+                continue
+            print(f"{st} ({len(mine)}): {SET_STATUS_HELP[st]}")
+            for x in mine:
+                print(f"  {x['set_code']}  NT${x.get('set_price') or '-':<6} {x.get('set_title', '')[:60]}")
+                if x.get("errors"):
+                    print(f"      {x['errors']}")
+        if not sets:
+            print("no sets yet")
     elif a.cmd == "labels":
         from .apps.sets import make_label_sheet
         cfg.ensure_dirs()
@@ -343,11 +404,19 @@ def main() -> None:
         meaning = {"needs_manual": "book not identified yet (ISBN / title / author missing)",
                    "enriched": "identified, but price or condition missing/invalid, or a photo missing",
                    "to_check": "complete - give it a quick check in the review window and Save",
-                   "validated": "checked by you, ready for a listing", "listed": "posted by you", "sold": "sold"}
+                   "validated": "checked by you, ready for a listing", "listed": "its set is on sale",
+                   "sold": "sold"}
         for st in ("needs_manual", "enriched", "to_check", "validated", "listed", "sold"):
             print(f"  {st:<13}{counts.pop(st, 0):>5}   {meaning[st]}")
         for st, n in counts.items():
             print(f"  {st:<13}{n:>5}")
+        from .apps.sets import SET_STATUS_HELP, refresh_sets
+        sets = Counter(x["status"] for x in refresh_sets(cfg))
+        if sets:
+            print("Sets (python -m pipeline sets for details):")
+            for st, words in SET_STATUS_HELP.items():
+                if sets.get(st):
+                    print(f"  {st:<13}{sets[st]:>5}   {words}")
     elif a.cmd == "review":
         try:
             from .apps.gui import run as run_gui

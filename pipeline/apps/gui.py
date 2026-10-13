@@ -1,9 +1,10 @@
-"""Review window (PyQt6): see which books need attention, fix their fields, save, make listings.
+"""Review window (PyQt6): see which books need attention, fix their fields, save; and the sets you sell.
 
     python -m pipeline review        or double-click review.bat
 
-Layout:  [toolbar: show finished | Refresh | Make listings]
+Layout:  [toolbar: show finished | Refresh | Sets & Shopee]
          [book list (red = needs something, green = ready)] | [editor for the selected book]
+'Sets & Shopee' opens the set view: every set's title, total price, description and listing status.
 
 All reading/writing of data goes through pipeline/apps/editing.py (no Qt there), so the rules are the same everywhere:
 a Save writes only that book's edited fields into data/books.csv, under a file lock shared with the Telegram bot.
@@ -590,6 +591,277 @@ class BookEditor(QWidget):
         self.set_filled.emit()
 
 
+# ---- the sets you sell -------------------------------------------------------------------------
+SET_COLOURS = {"draft": RED, "ready": AMBER, "listed": GREEN, "reserved": "#1d4ed8", "sold": "#6b6a66",
+               "withdrawn": "#6b6a66"}
+SET_WORDS = {"draft": "not ready", "ready": "ready for Shopee", "listed": "listed", "reserved": "ORDERED",
+             "sold": "sold", "withdrawn": "withdrawn"}
+
+
+class SetsWindow(QDialog):
+    """Every set: its title, total price, weight and size, description (all editable - your text is then kept), its
+    Shopee listing (status, link, order), and buttons to make the Shopee upload file or change the status by hand."""
+    changed = pyqtSignal()            # books may have changed status (listed / sold): the main list reloads
+
+    def __init__(self, cfg: Config, parent=None):
+        super().__init__(parent)
+        self.cfg = cfg
+        self.sets: list = []
+        self.current: dict = {}
+        self.setWindowTitle(f"Sets - {cfg.sets_path.resolve()}")
+        self.resize(1150, 850)
+
+        self.list = QListWidget()
+        self.list.setMinimumWidth(330)
+        self.list.currentItemChanged.connect(self._select)
+        self.heading = QLabel("Choose a set")
+        self.heading.setObjectName("heading")
+        self.state = QLabel("")
+        self.state.setTextFormat(Qt.TextFormat.RichText)
+        self.state.setWordWrap(True)
+        self.title = QLineEdit()
+        self.title.setMaxLength(60)
+        self.price = QLineEdit()
+        self.price.setMaximumWidth(120)
+        self.weight = QLineEdit()
+        self.weight.setMaximumWidth(120)
+        self.size = QLineEdit()
+        self.size.setPlaceholderText("length,width,height")
+        self.size.setMaximumWidth(160)
+        self.description = QPlainTextEdit()
+        self.description.setMinimumHeight(330)
+        self.count = QLabel("")
+        self.description.textChanged.connect(self._count)
+        form = QFormLayout()
+        form.addRow("Title (max 60)", self.title)
+        money = QHBoxLayout()
+        money.addWidget(self.price)
+        money.addWidget(QLabel("TWD     Weight (g)"))
+        money.addWidget(self.weight)
+        money.addWidget(QLabel("Parcel (cm)"))
+        money.addWidget(self.size)
+        money.addStretch(1)
+        form.addRow("Set price", money)
+        form.addRow("Description", self.description)
+        form.addRow("", self.count)
+        self.save_btn = QPushButton("Save set")
+        self.save_btn.setToolTip("What you change here is kept; the automatic text no longer replaces it")
+        self.save_btn.clicked.connect(self.save)
+        self.auto_btn = QPushButton("Back to automatic text")
+        self.auto_btn.setToolTip("Forget your changes: title, price, description ... worked out from the books again")
+        self.auto_btn.clicked.connect(self.automatic)
+        buttons = QHBoxLayout()
+        for w in (self.save_btn, self.auto_btn):
+            buttons.addWidget(w)
+        buttons.addStretch(1)
+
+        self.listing = QLabel("")
+        self.listing.setTextFormat(Qt.TextFormat.RichText)
+        self.listing.setOpenExternalLinks(True)
+        self.listing.setWordWrap(True)
+        self.link_edit = QLineEdit()
+        self.link_edit.setPlaceholderText("after publishing on Shopee: paste the product's link here")
+        self.link_btn = QPushButton("Save link")
+        self.link_btn.clicked.connect(self.save_link)
+        link_row = QHBoxLayout()
+        link_row.addWidget(self.link_edit, 1)
+        link_row.addWidget(self.link_btn)
+        self.status_box = QComboBox()
+        for st, words in (("ready", "ready - put it in the next upload file"), ("listed", "listed (by hand)"),
+                          ("sold", "sold (elsewhere / in person)"), ("withdrawn", "withdrawn - not for sale")):
+            self.status_box.addItem(words, st)
+        self.status_btn = QPushButton("Change status")
+        self.status_btn.clicked.connect(self.change_status)
+        status_row = QHBoxLayout()
+        status_row.addWidget(self.status_box)
+        status_row.addWidget(self.status_btn)
+        status_row.addStretch(1)
+        shop_box = QGroupBox("Shopee")
+        shop = QVBoxLayout(shop_box)
+        shop.addWidget(self.listing)
+        shop.addLayout(link_row)
+        shop.addLayout(status_row)
+
+        self.upload_btn = QPushButton("Make Shopee upload file")
+        self.upload_btn.setToolTip("Same as shopee.bat: read Shopee's files in the import folder, then make the "
+                                   "upload file for every ready set")
+        self.upload_btn.clicked.connect(self.make_upload)
+        self.message = QLabel("")
+        self.message.setWordWrap(True)
+        top = QHBoxLayout()
+        top.addWidget(self.upload_btn)
+        top.addWidget(self.message, 1)
+
+        right = QWidget()
+        lay = QVBoxLayout(right)
+        lay.addWidget(self.heading)
+        lay.addWidget(self.state)
+        lay.addLayout(form)
+        lay.addLayout(buttons)
+        lay.addWidget(shop_box)
+        lay.addStretch(1)
+        scroll = QScrollArea()
+        scroll.setWidget(right)
+        scroll.setWidgetResizable(True)
+        split = QSplitter(Qt.Orientation.Horizontal)
+        split.addWidget(self.list)
+        split.addWidget(scroll)
+        split.setStretchFactor(1, 1)
+        outer = QVBoxLayout(self)
+        outer.addLayout(top)
+        outer.addWidget(split)
+        self.reload()
+
+    def reload(self, keep: str = None) -> None:
+        keep = keep or self.current.get("set_code")
+        try:
+            self.sets = editing.list_sets(self.cfg)
+        except Exception as exc:
+            QMessageBox.warning(self, "Could not read the sets", str(exc))
+            return
+        self.list.blockSignals(True)
+        self.list.clear()
+        select = None
+        for st in self.sets:
+            item = QListWidgetItem(f"{st['set_code']}   NT${st.get('set_price') or '-'}\n"
+                                   f"      {SET_WORDS.get(st['status'], st['status'])}   {st.get('book_count')} books")
+            item.setData(Qt.ItemDataRole.UserRole, st["set_code"])
+            item.setIcon(dot_icon(SET_COLOURS.get(st["status"], RED)))
+            self.list.addItem(item)
+            if st["set_code"] == keep:
+                select = item
+        self.list.blockSignals(False)
+        if select is None and self.list.count():
+            select = self.list.item(0)
+        if select is not None:
+            self.list.setCurrentItem(select)
+            self._select(select, None)
+        else:
+            self.heading.setText("No sets yet - send photos to the bot first")
+
+    def _select(self, current, previous=None) -> None:
+        if current is None:
+            return
+        code = current.data(Qt.ItemDataRole.UserRole)
+        st = next((x for x in self.sets if x["set_code"] == code), None)
+        if st:
+            self.load(st)
+
+    def load(self, st: dict) -> None:
+        self.current = st
+        self.heading.setText(f"Set {st['set_code']}")
+        colour = SET_COLOURS.get(st["status"], RED)
+        text = f"<b style='color:{colour}'>{html.escape(SET_WORDS.get(st['status'], st['status']))}</b>"
+        if st.get("errors"):
+            text += f"<br><span style='color:{RED}'>{html.escape(st['errors'])}</span>"
+        books = "; ".join(f"#{b['position']} {b['title'][:14]} NT${b['price'] or '-'}" for b in st.get("books", []))
+        text += f"<br><span style='color:#6b6a66'>{html.escape(books)}</span>"
+        if st.get("custom"):
+            text += f"<br><span style='color:#6b6a66'>Your own: {html.escape(st['custom'])}</span>"
+        self.state.setText(text)
+        self.title.setText(st.get("set_title", ""))
+        self.price.setText(st.get("set_price", ""))
+        self.weight.setText(st.get("weight_g", ""))
+        self.size.setText(",".join(st.get(k, "") for k in ("length_cm", "width_cm", "height_cm")).strip(","))
+        self.description.setPlainText(st.get("description", ""))
+        li = st.get("shopee") or {}
+        if li:
+            parts = [f"Status: <b>{html.escape(li.get('status') or '-')}</b>"]
+            if li.get("url"):
+                parts.append(f"<a href='{html.escape(li['url'], quote=True)}'>open on Shopee</a>")
+            if li.get("export_file"):
+                parts.append(f"in {html.escape(li['export_file'])}")
+            if li.get("shopee_order_sn") or li.get("shopee_order_status"):
+                parts.append(f"order {html.escape(li.get('shopee_order_sn', ''))} "
+                             f"{html.escape(li.get('shopee_order_status', ''))}")
+            if li.get("errors"):
+                parts.append(html.escape(li["errors"]))
+            self.listing.setText("<br>".join(parts))
+        else:
+            self.listing.setText("Not on Shopee yet.")
+        self.link_edit.setText("")
+        i = self.status_box.findData(st["status"])
+        self.status_box.setCurrentIndex(i if i >= 0 else 0)
+        self.message.setText("")
+
+    def _count(self) -> None:
+        n = len(self.description.toPlainText())
+        self.count.setText(f"{n} / 3000 characters" + ("  - TOO LONG for Shopee" if n > 3000 else ""))
+
+    def _fields(self) -> dict:
+        size = [x.strip() for x in self.size.text().replace("x", ",").split(",")] + ["", "", ""]
+        return {"set_title": self.title.text(), "set_price": self.price.text(), "weight_g": self.weight.text(),
+                "length_cm": size[0], "width_cm": size[1], "height_cm": size[2],
+                "description": self.description.toPlainText()}
+
+    def save(self) -> bool:
+        if not self.current:
+            return False
+        try:
+            stored = editing.save_set(self.cfg, self.current["set_code"], self._fields())
+        except Exception as exc:
+            QMessageBox.warning(self, "Not saved", str(exc))
+            return False
+        self.reload(keep=stored["set_code"])
+        note = " - change it on Shopee too" if stored["status"] in ("listed", "reserved") else ""
+        self.message.setText(f"Saved {stored['set_code']}{note}")
+        return True
+
+    def automatic(self) -> None:
+        if not self.current:
+            return
+        if self.current["status"] not in ("draft", "ready"):
+            self.message.setText("Only a set not yet listed gets automatic text")
+            return
+        editing.save_set(self.cfg, self.current["set_code"], {k: "" for k in self._fields()})
+        self.reload()
+        self.message.setText("Back to the automatic title, price and description")
+
+    def save_link(self) -> None:
+        if not self.current:
+            return
+        try:
+            li = editing.shopee_link(self.cfg, self.current["set_code"], self.link_edit.text())
+        except Exception as exc:
+            self.message.setText(str(exc))
+            return
+        self.reload()
+        self.changed.emit()
+        self.message.setText(f"Saved: on Shopee as item {li['shopee_item_id']}")
+
+    def change_status(self) -> None:
+        if not self.current:
+            return
+        status = self.status_box.currentData()
+        try:
+            msgs = editing.set_status(self.cfg, self.current["set_code"], status)
+        except Exception as exc:
+            QMessageBox.warning(self, "Not changed", str(exc))
+            return
+        self.reload()
+        self.changed.emit()
+        self.message.setText(f"{self.current['set_code']}: {self.current['status']}")
+        if msgs:
+            QMessageBox.information(self, "Take it down", "\n".join(msgs))
+
+    def make_upload(self) -> None:
+        self.upload_btn.setEnabled(False)
+        self.upload_btn.setText("Working...")
+
+        def done(text: str):
+            self.upload_btn.setEnabled(True)
+            self.upload_btn.setText("Make Shopee upload file")
+            self.reload()
+            self.changed.emit()
+            QMessageBox.information(self, "Shopee", text)
+
+        def failed(msg: str):
+            self.upload_btn.setEnabled(True)
+            self.upload_btn.setText("Make Shopee upload file")
+            QMessageBox.warning(self, "Shopee", msg)
+        run_in_background(editing.shopee_upload, self.cfg, on_done=done, on_fail=failed)
+
+
 # ---- the main window ---------------------------------------------------------------------------
 class ReviewWindow(QMainWindow):
     def __init__(self, cfg: Config):
@@ -609,11 +881,13 @@ class ReviewWindow(QMainWindow):
         self.show_all.toggled.connect(lambda _: self.reload())
         refresh = QPushButton("Refresh")
         refresh.clicked.connect(lambda: self.reload())
-        self.listings_btn = QPushButton("Make listings for finished sets")
-        self.listings_btn.clicked.connect(self.make_listings)
+        self.sets_btn = QPushButton("Sets && Shopee")
+        self.sets_btn.setToolTip("Every set: title, total price, description, Shopee status; make the Shopee upload file")
+        self.sets_btn.clicked.connect(self.open_sets)
+        self.sets_window = None
         self.banner = QLabel("")
         self.banner.setStyleSheet(f"color: {RED}; padding-left: 12px;")
-        for w in (self.count, self.show_all, refresh, self.listings_btn, self.banner):
+        for w in (self.count, self.show_all, refresh, self.sets_btn, self.banner):
             bar.addWidget(w)
 
         self.list = QListWidget()
@@ -685,7 +959,7 @@ class ReviewWindow(QMainWindow):
         else:
             self.editor.row = {}
             self.editor.setEnabled(False)
-            self.editor.heading.setText("Nothing left to check - press 'Make listings'" if not self.show_all.isChecked()
+            self.editor.heading.setText("Nothing left to check - press 'Sets & Shopee'" if not self.show_all.isChecked()
                                         else "No books yet")
 
     @staticmethod
@@ -757,27 +1031,12 @@ class ReviewWindow(QMainWindow):
                 self.list.setCurrentRow(i)
                 return
 
-    def make_listings(self) -> None:
+    def open_sets(self) -> None:
         if self.editor.dirty and not self._ask_save():
             return
-        self.listings_btn.setEnabled(False)
-        self.listings_btn.setText("Making listings...")
-
-        def done(res: dict):
-            self._listings_finished()
-            text = f"Made {len(res['made'])} listing(s) in:\n{res['folder']}"
-            if res["skipped"]:
-                text += "\n\nNot made:\n" + "\n".join(res["skipped"])
-            QMessageBox.information(self, "Listings", text)
-
-        def failed(msg: str):
-            self._listings_finished()
-            QMessageBox.warning(self, "Listings", msg)
-        run_in_background(editing.make_listings, self.cfg, on_done=done, on_fail=failed)
-
-    def _listings_finished(self) -> None:
-        self.listings_btn.setEnabled(True)
-        self.listings_btn.setText("Make listings for finished sets")
+        self.sets_window = SetsWindow(self.cfg, self)
+        self.sets_window.changed.connect(lambda: self.reload())
+        self.sets_window.show()
 
     def closeEvent(self, event):
         if self.editor.dirty and not self._ask_save():

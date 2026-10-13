@@ -55,7 +55,7 @@ def cfg(tmp_path):
         {"sku": "b-S01-05", "batch": "b", "set_id": "S01", "position": "5", "isbn13": TW_ISBNS[4], "title": "Done",
          "author": "A", "condition": "like_new", "price": "5", "currency": "NZD", "status": "validated", **photos},
         {"sku": "b-S01-06", "batch": "b", "set_id": "S01", "position": "6", "status": "needs_manual",
-         "trademe_id": "keep-me", **photos},
+         "created_at": "keep-me", **photos},
         {"sku": "b-S01-07", "batch": "b", "set_id": "S01", "position": "7", "isbn13": TW_ISBNS[6], "title": "T7",
          "author": "A7", "price": "abc", "status": "enriched", **photos},
     ])
@@ -78,7 +78,7 @@ def test_fix_a_book_and_save(gui, cfg):
     assert ed.save() is True and not ed.dirty
     rows = {r["sku"]: r for r in store.read_rows(cfg.csv_path)}
     assert rows["b-S01-06"]["isbn13"] == "9789861371955" and rows["b-S01-06"]["status"] == "validated"
-    assert rows["b-S01-06"]["trademe_id"] == "keep-me" and rows["b-S01-05"]["title"] == "Done"
+    assert rows["b-S01-06"]["created_at"] == "keep-me" and rows["b-S01-05"]["title"] == "Done"
     assert rows["b-S01-06"]["price"] == "6" and rows["b-S01-06"]["currency"] == "TWD"
     assert "checked" in w.list.currentItem().text()          # saving = checked by you
 
@@ -217,3 +217,26 @@ def test_to_check_books_show_and_save_confirms(gui, cfg):
     assert w.editor.save()                                # nothing changed - 'Save / looks right'
     assert {r["sku"]: r for r in store.read_rows(cfg.csv_path)}["b-S01-05"]["status"] == "validated"
     assert "checked" in w.list.item(i).text()
+
+
+def test_sets_window(gui, cfg):
+    from pipeline.apps.sets import refresh_sets
+    w = gui.SetsWindow(cfg)
+    gui.settle()
+    assert w.list.count() == 1 and w.current["set_code"] == "b-S01" and w.current["status"] == "draft"
+    assert "not checked yet" in w.state.text()
+    w.title.setText("【b-S01】三本書")
+    assert w.save() is True
+    s = refresh_sets(cfg)[0]
+    assert s["set_title"] == "【b-S01】三本書" and s["custom"] == "set_title"
+    w.status_box.setCurrentIndex(w.status_box.findData("withdrawn"))
+    w.change_status()
+    assert refresh_sets(cfg)[0]["status"] == "withdrawn" and w.current["status"] == "withdrawn"
+    w.link_edit.setText("https://shopee.tw/x-i.1.2")
+    w.save_link()
+    assert refresh_sets(cfg)[0]["status"] == "listed" and "item 2" in w.message.text()
+    shown = []
+    gui.QMessageBox.information = staticmethod(lambda parent, title, text: shown.append(text))
+    w.make_upload()
+    gui.settle()
+    assert shown and "No set is ready" in shown[0]

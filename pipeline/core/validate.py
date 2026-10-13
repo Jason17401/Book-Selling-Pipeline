@@ -8,9 +8,9 @@ Status of a book (column `status` in books.csv):
   to_check      Nothing is missing, but nobody has looked at it yet: every newly processed book with complete data
                 lands here. Open it in the review window, glance at the fields and press Save (or Ctrl+Enter) -
                 that confirms it.
-  validated     Complete AND confirmed by you: ready to go into a listing (export-sets / "Make listings").
-  listed        You posted it (set this yourself). The pipeline never changes listed / sold books.
-  sold          Sold (set this yourself).
+  validated     Complete AND confirmed by you. When every book of a set is validated, the set is 'ready' to sell.
+  listed        Its set is on sale (the set's status decides this - data/sets.csv, pipeline/apps/sets.py).
+  sold          Its set is sold. The book checks here never change listed / sold books.
 Condition and price are REQUIRED (new books get DEFAULT_CONDITION, normally like_new, and a price worked out from the
 market price when one is found). The market price is OPTIONAL: an empty one is fine, a filled-in one must be valid.
 """

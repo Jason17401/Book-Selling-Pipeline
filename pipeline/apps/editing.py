@@ -181,11 +181,45 @@ def suggestion(cfg: Config, market_price: str, market_currency: str) -> dict:
     return s or {"error": "Type a market price first (a number)."}
 
 
-def make_listings(cfg: Config) -> dict:
-    from .sets import build_set_listings
-    res = build_set_listings(store.read_rows(cfg.csv_path), cfg)
-    return {"made": res["made"], "skipped": [f"{k}: {why}" for k, why in res["skipped"]],
-            "folder": str((cfg.listings_dir / "sets").resolve())}
+# ---- sets (the 'Sets & Shopee' window) ------------------------------------------------------------
+def list_sets(cfg: Config) -> list:
+    """Every set as the set view shows it: data/sets.csv brought up to date, plus its Shopee listing and books."""
+    from .sets import books_of, refresh_sets
+    sets = refresh_sets(cfg)
+    listings = store.read_table(cfg.listings_path)
+    books = store.read_rows(cfg.csv_path)
+    out = []
+    for st in sets:
+        li = next((x for x in listings if x["set_code"] == st["set_code"] and x["platform"] == "shopee"), {})
+        group = books_of(cfg, st["set_code"], books)
+        out.append({**st, "shopee": dict(li),
+                    "books": [{"position": b.get("position"), "title": b.get("title", ""), "price": b.get("price", ""),
+                               "status": b.get("status", "")} for b in group]})
+    return out
+
+
+def save_set(cfg: Config, code: str, fields: dict) -> dict:
+    from .sets import save_set_fields
+    return save_set_fields(cfg, code, fields)
+
+
+def set_status(cfg: Config, code: str, status: str) -> list:
+    from .sets import change_set_status
+    return change_set_status(cfg, code, status)
+
+
+def shopee_link(cfg: Config, code: str, url: str) -> dict:
+    from .shopee import set_link
+    return set_link(cfg, code, url)
+
+
+def shopee_upload(cfg: Config) -> str:
+    """What shopee.bat does (read Shopee's files, make the upload file), as text to show."""
+    from .shopee import ShopeeError, run
+    try:
+        return "\n".join(run(cfg)["text"])
+    except ShopeeError as exc:
+        return f"Not done: {exc}"
 
 
 # ---- photos -----------------------------------------------------------------------------------

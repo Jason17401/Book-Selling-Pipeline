@@ -7,6 +7,10 @@ beautifulsoup4>=4.12           # reading books.com.tw / NCL pages
 tzdata                         # Windows: lets the Google quota counter know US Pacific midnight
 python-telegram-bot>=21.0
 PyQt6>=6.5                     # the review window
+openpyxl>=3.1                  # Shopee's Excel upload file and reports
+msoffcrypto-tool>=5.4          # opens Shopee's password-protected order report
 # Optional third reader (often reads blurry/glary barcodes the others miss). On Windows it may also need the
 # "Microsoft Visual C++ Redistributable"; if it fails to load it is simply skipped.
 # pyzbar>=0.1.9
+# Optional: uploads the set photos to a bucket (Cloudflare R2) so Shopee gets photo links - README 4.6
+# boto3>=1.34

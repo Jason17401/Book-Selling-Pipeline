@@ -1,0 +1,653 @@
+"""Selling the sets on Shopee (蝦皮購物) as an individual seller in Taiwan.
+
+Shopee's API is only open to Shopee Mall sellers and registered companies in Taiwan, so this uses Shopee's own bulk
+upload (大量上傳) instead - no robot ever logs into Seller Center:
+
+  python -m pipeline shopee        (or double-click shopee.bat)
+    1. reads any Shopee files you put in data/listings/shopee/import (the order report, and/or a product list) and
+       updates what was listed / ordered / sold;
+    2. every set that is 'ready' (all its books checked) gets its photos (data/listings/photos/<set code>/01.jpg ...)
+       and a row in ONE upload file: data/listings/shopee/shopee_upload_<date-time>.xlsx, filled into Shopee's own
+       template (data/listings/shopee/template.xlsx).
+  YOU then: Seller Center -> 我的商品 -> 新增商品 -> 大量上傳 -> upload that file. The sets wait under 尚未刊登 (not yet
+  published): add the photos if they have no links, check them, publish.
+
+Each set's code (batch-set_id, e.g. 20261008-153012-S01) is its parent SKU (主商品貨號) and is in its title, so every
+Shopee file that mentions a set can be matched back to its books.
+"""
+from __future__ import annotations
+
+import csv
+import io
+import re
+import shutil
+import time
+from pathlib import Path
+from typing import Optional
+
+from ..core import store
+from ..core.config import Config
+from .sets import (ACTIVE_LISTING, apply_set_status, books_of, make_set_images, now_text, refresh_sets)
+
+PLATFORM = "shopee"
+ON, OFF = "開啟", "關閉"           # the template's dropdown values for each delivery option
+CONDITION = "二手"
+
+
+class ShopeeError(RuntimeError):
+    """Something you need to fix first (shown as one plain message)."""
+
+
+# ---- Shopee's bulk-upload template ----------------------------------------------------------------
+# (field, words that identify its column in the template's header - Chinese, English or Shopee's own keys)
+COLUMN_WORDS = [
+    ("cover_image", ("主商品圖片", "cover image", "cover_image")),
+    ("parent_sku", ("主商品貨號", "parent sku", "parent_sku", "sku_parent")),
+    ("skip", ("規格", "variation", "選項", "option")),        # variations: a set is one product, left empty
+    ("image", ("商品圖片", "item image", "item_image", "image")),
+    ("category", ("分類", "category")),
+    ("name", ("商品名稱", "product name", "product_name")),
+    ("description", ("商品描述", "description")),
+    ("price", ("價格", "price")),
+    ("stock", ("庫存", "stock")),
+    ("weight", ("重量", "weight")),
+    ("length", ("長度", "length")),
+    ("width", ("寬度", "width")),
+    ("height", ("高度", "height")),
+    ("days_to_ship", ("備貨", "出貨天數", "days to ship", "days_to_ship", "pre-order", "preorder", "pre_order")),
+    ("condition", ("保存狀況", "商品狀況", "condition")),
+]
+DELIVERY_WORDS = ("7-eleven", "7-11", "全家", "萊爾富", "ok mart", "ok便利", "ok超商", "店到店", "店到家", "宅配", "黑貓",
+                  "新竹", "郵局", "郵政", "嘉里", "隔日到貨", "物流", "logistic", "channel")
+PLAIN_HEADER = ["分類代碼", "商品名稱", "商品描述", "主商品貨號", "價格", "庫存", "主商品圖片"] + \
+               [f"商品圖片 {i}" for i in range(1, 9)] + ["重量", "長度", "寬度", "高度", "較長備貨天數", "商品保存狀況"]
+
+
+def _text(v) -> str:
+    return "" if v is None else str(v).strip()
+
+
+def column_field(header: str) -> str:
+    """Which field a template column is for ('' = none we fill)."""
+    h = header.lower()
+    if not h:
+        return ""
+    for field, words in COLUMN_WORDS:
+        if any(w in h for w in words):
+            return field
+    if any(w in h for w in DELIVERY_WORDS) or h == "ok" or h.startswith("ok "):
+        return "delivery"
+    return ""
+
+
+def _layout(ws):
+    """(column texts {col: header text}, first data row) of the upload sheet. The header is every row (of the first
+    12) with a 商品名稱 / Product Name / product_name cell - Shopee's templates have a row of their own keys and a row
+    of names - and data starts at the first empty row after the explanation rows below them."""
+    rows = [list(r) for r in ws.iter_rows(min_row=1, max_row=12, values_only=True)]
+    heads = [i for i, r in enumerate(rows) if any(column_field(_text(c)) == "name" for c in r)]
+    if not heads:
+        return None, None
+    cols = {}
+    width = max(len(r) for r in rows)
+    for j in range(width):
+        text = " ".join(_text(rows[i][j]) for i in heads if j < len(rows[i]) and _text(rows[i][j]))
+        if text:
+            cols[j + 1] = text
+    last = heads[-1]
+    start = next((i for i in range(last + 1, len(rows)) if not any(_text(c) for c in rows[i])), last + 4)
+    return cols, start + 1
+
+
+def _upload_sheet(wb):
+    best = None
+    for ws in wb.worksheets:
+        cols, start = _layout(ws)
+        if cols and (best is None or len(cols) > len(best[1])):
+            best = (ws, cols, start)
+    return best
+
+
+def find_template(cfg: Config) -> Optional[Path]:
+    p = cfg.template_path
+    if p.exists():
+        return p
+    if p.with_suffix(".xls").exists():
+        raise ShopeeError(f"{p.with_suffix('.xls')} is an old .xls file: open it in Excel, File > Save As > Excel "
+                          f"Workbook (.xlsx), as {p.name}")
+    return None
+
+
+def find_category(cfg: Config, wb) -> tuple:
+    """(category id, candidates) - SHOPEE_CATEGORY_ID, or the one category in the template's category list whose name
+    contains SHOPEE_CATEGORY_NAME (default 二手書)."""
+    if cfg.shopee_category_id:
+        return cfg.shopee_category_id, []
+    found = {}
+    word = cfg.shopee_category_name
+    if wb is not None and word:
+        for ws in wb.worksheets:
+            for row in ws.iter_rows(values_only=True):
+                texts = [_text(c) for c in row]
+                if any(word in t for t in texts):
+                    ids = [t for t in texts if re.fullmatch(r"\d{3,}", t)]
+                    if ids:
+                        found[ids[0]] = " > ".join(t for t in texts if t and not t.isdigit())
+    if len(found) == 1:
+        return next(iter(found)), []
+    return "", [f"{k}  {v}" for k, v in found.items()]
+
+
+def fill_upload(cfg: Config, items: list, out: Path, template: Optional[Path], category: str) -> list:
+    """Write the sets into Shopee's template (one product per set). Returns notes about template columns we could not
+    fill or did not find."""
+    import openpyxl
+    notes = []
+    if template is not None:
+        wb = openpyxl.load_workbook(template)
+        found = _upload_sheet(wb)
+        if found is None:
+            raise ShopeeError(f"{template.name}: no sheet with a 商品名稱 (product name) column - is it Shopee's "
+                              "bulk-upload template?")
+        ws, cols, start = found
+    else:
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "upload"
+        header = PLAIN_HEADER + [x.upper() if x.isascii() else x for x in cfg.shopee_logistics]
+        for j, h in enumerate(header, 1):
+            ws.cell(1, j, h)
+        cols, start = {j: h for j, h in enumerate(header, 1)}, 2
+        notes.append(f"No Shopee template found ({cfg.template_path}): wrote a plain sheet. Shopee only accepts its "
+                     "own template - put it there (README 'Selling on Shopee') and run again with --redo.")
+    fields = {j: column_field(h) for j, h in cols.items()}
+    present = set(fields.values())
+    for want, what in (("cover_image", "main photo"), ("parent_sku", "parent SKU / set code"),
+                       ("category", "category"), ("weight", "weight")):
+        if want not in present:
+            notes.append(f"The template has no {what} column")
+    if "condition" not in present:
+        notes.append("The template has no condition column: Shopee keeps its default - the description says 二手")
+    in_grams = any(f == "weight" and ("公克" in cols[j] or "(g)" in cols[j].lower()) for j, f in fields.items())
+    for i, it in enumerate(items):
+        r = start + i
+        images = list(it["image_urls"])
+        for j, f in sorted(fields.items()):
+            value = None
+            if f == "category":
+                value = int(category) if category.isdigit() else category
+            elif f == "name":
+                value = it["title"]
+            elif f == "description":
+                value = it["description"]
+            elif f == "parent_sku":
+                value = it["code"]
+            elif f == "price":
+                value = int(float(it["price"]))
+            elif f == "stock":
+                value = 1
+            elif f == "cover_image":
+                value = images.pop(0) if images else None
+            elif f == "image":
+                value = images.pop(0) if images else None
+            elif f == "weight" and it.get("weight_g"):
+                g = float(it["weight_g"])
+                value = int(round(g)) if in_grams else round(g / 1000, 2)
+            elif f in ("length", "width", "height") and it.get(f + "_cm"):
+                value = int(round(float(it[f + "_cm"])))
+            elif f == "days_to_ship" and cfg.shopee_days_to_ship:
+                value = int(cfg.shopee_days_to_ship) if cfg.shopee_days_to_ship.isdigit() else cfg.shopee_days_to_ship
+            elif f == "condition":
+                value = CONDITION
+            elif f == "delivery":
+                h = cols[j].lower()
+                value = ON if any(w in h for w in cfg.shopee_logistics) else OFF
+            if value is not None:
+                ws.cell(r, j, value)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    wb.save(out)
+    return notes
+
+
+# ---- photos online (optional) --------------------------------------------------------------------
+def upload_images(cfg: Config, code: str, paths: list, client=None) -> list:
+    """The photos' public links (IMAGE_PUBLIC_URL/<set code>/01.jpg ...), uploading them first when a bucket is set
+    (S3_BUCKET: Cloudflare R2 or any S3-compatible storage). No IMAGE_PUBLIC_URL: no links (add photos by hand)."""
+    if not cfg.image_public_url:
+        return []
+    if cfg.s3_bucket:
+        if client is None:
+            try:
+                import boto3
+            except ImportError:
+                raise ShopeeError("Uploading photos needs boto3: .venv\\Scripts\\python -m pip install boto3")
+            client = boto3.client("s3", endpoint_url=cfg.s3_endpoint_url or None, region_name="auto",
+                                  aws_access_key_id=cfg.s3_access_key_id or None,
+                                  aws_secret_access_key=cfg.s3_secret_access_key or None)
+        for p in paths:
+            client.upload_file(str(p), cfg.s3_bucket, f"{code}/{Path(p).name}",
+                               ExtraArgs={"ContentType": "image/jpeg"})
+    return [f"{cfg.image_public_url}/{code}/{Path(p).name}" for p in paths]
+
+
+# ---- links -------------------------------------------------------------------------------------
+def parse_url(url: str) -> tuple:
+    """(shop id, item id) from a Shopee product link: shopee.tw/<name>-i.<shop>.<item> or shopee.tw/product/<shop>/<item>."""
+    m = re.search(r"-i\.(\d+)\.(\d+)", url or "") or re.search(r"/product/(\d+)/(\d+)", url or "")
+    return (m.group(1), m.group(2)) if m else ("", "")
+
+
+def item_url(shop_id: str, item_id: str) -> str:
+    return f"https://shopee.tw/product/{shop_id}/{item_id}" if shop_id and item_id else ""
+
+
+# ---- listings.csv helpers ----------------------------------------------------------------------
+def _listing(listings: list, code: str) -> Optional[dict]:
+    return next((li for li in listings if li["set_code"] == code and li["platform"] == PLATFORM), None)
+
+
+def _new_listing(listings: list, code: str) -> dict:
+    li = {"set_code": code, "platform": PLATFORM}
+    listings.append(li)
+    return li
+
+
+def _other_active(listings: list, code: str) -> list:
+    return [li for li in listings if li["set_code"] == code and li["platform"] != PLATFORM
+            and li.get("status") in ACTIVE_LISTING]
+
+
+# ---- export ------------------------------------------------------------------------------------
+def export(cfg: Config, redo=(), client=None) -> dict:
+    """Make the upload file for every set that is ready and not on Shopee yet (and the sets in `redo` again).
+    Returns {"file", "made": [codes], "drafts": [(code, why)], "notes": [...], "photos": folder}."""
+    redo = set(redo or ())
+    res = {"file": None, "made": [], "drafts": [], "notes": [], "photos": cfg.listings_dir / "photos"}
+    sets = refresh_sets(cfg)
+    known = {s["set_code"] for s in sets}
+    for code in redo - known:
+        res["notes"].append(f"{code}: no such set")
+    listings = store.read_table(cfg.listings_path)
+    active = {li["set_code"] for li in listings if li["platform"] == PLATFORM and li.get("status") in ACTIVE_LISTING}
+    todo = [s for s in sets if (s["status"] == "ready" and s["set_code"] not in active)
+            or (s["set_code"] in redo and s["status"] not in ("draft", "sold"))]
+    res["drafts"] = [(s["set_code"], s.get("errors") or "not ready") for s in sets if s["status"] == "draft"]
+    for s in sets:
+        if s["set_code"] in redo and s["status"] in ("draft", "sold"):
+            res["notes"].append(f"{s['set_code']} is {s['status']}: not put in the file")
+    if not todo:
+        return res
+    template = find_template(cfg)
+    wb = None
+    if template is not None:
+        import openpyxl
+        wb = openpyxl.load_workbook(template, read_only=True)
+    category, candidates = find_category(cfg, wb)
+    if wb is not None:
+        wb.close()
+    if not category:
+        msg = ("Set SHOPEE_CATEGORY_ID in .env to the 分類代碼 (category code) of the category your sets go in - "
+               "it is in the category list of Shopee's template.")
+        if candidates:
+            msg += f" Categories containing '{cfg.shopee_category_name}':\n  " + "\n  ".join(candidates[:15])
+        raise ShopeeError(msg)
+    books = store.read_rows(cfg.csv_path)
+    items = []
+    for s in todo:
+        code = s["set_code"]
+        group = books_of(cfg, code, books)
+        if not group:
+            res["notes"].append(f"{code}: its books are not in books.csv any more - skipped")
+            continue
+        paths = make_set_images(code, group, cfg, cfg.listings_dir / "photos" / code, cfg.shopee_max_images)
+        urls = upload_images(cfg, code, paths, client)
+        items.append({"code": code, "title": s["set_title"], "description": s["description"],
+                      "price": s["set_price"], "weight_g": s.get("weight_g"), "length_cm": s.get("length_cm"),
+                      "width_cm": s.get("width_cm"), "height_cm": s.get("height_cm"), "image_urls": urls,
+                      "images": [str(p) for p in paths]})
+    if not items:
+        return res
+    out = cfg.shopee_dir / f"shopee_upload_{time.strftime('%Y%m%d-%H%M%S')}.xlsx"
+    n = 1
+    while out.exists():                        # never overwrite an earlier upload file
+        n += 1
+        out = out.with_name(f"{out.stem.split('_v')[0]}_v{n}.xlsx")
+    res["notes"] += fill_upload(cfg, items, out, template, category)
+    res["file"] = out
+    stamp = now_text()
+    with store.locked(cfg.csv_path), store.locked(cfg.sets_path), store.locked(cfg.listings_path):
+        books = store.read_rows(cfg.csv_path)
+        sets = store.read_table(cfg.sets_path)
+        listings = store.read_table(cfg.listings_path)
+        for it in items:
+            code = it["code"]
+            s = next(x for x in sets if x["set_code"] == code)
+            if s["status"] not in ("listed", "reserved", "sold"):
+                apply_set_status(s, "listed", books_of(cfg, code, books))
+                s["errors"] = ""
+            s["images"] = ";".join(it["images"])
+            s["updated_at"] = stamp
+            li = _listing(listings, code) or _new_listing(listings, code)
+            for k in store.LISTING_COLUMNS[2:]:
+                li[k] = ""
+            li.update({"status": "exported", "title": it["title"], "price": str(int(float(it["price"]))),
+                       "currency": "TWD", "export_file": str(out), "exported_at": stamp, "updated_at": stamp,
+                       "shopee_sku": code, "shopee_category_id": category, "shopee_condition": CONDITION,
+                       "shopee_logistics": ",".join(cfg.shopee_logistics),
+                       "shopee_days_to_ship": cfg.shopee_days_to_ship,
+                       "errors": "" if it["image_urls"] else "add the photos by hand when you publish"})
+            res["made"].append(code)
+        store.write_rows(cfg.csv_path, books)
+        store.write_table(cfg.sets_path, sets, store.SET_COLUMNS)
+        store.write_table(cfg.listings_path, listings, store.LISTING_COLUMNS)
+    return res
+
+
+# ---- reading Shopee's files back -------------------------------------------------------------------
+ORDER_ID = ("訂單編號", "訂單號碼", "order id", "order sn", "order_sn", "order no")
+ITEM_ID = ("商品id", "商品 id", "product id", "product_id", "item id", "item_id")
+
+
+def read_report(path: Path, password: str = "") -> list:
+    """Every sheet of a Shopee file as lists of cell texts. Shopee's order report is password protected (the last
+    6 digits of your phone, usually): with SHOPEE_EXPORT_PASSWORD and msoffcrypto-tool it is opened directly;
+    otherwise open it in Excel once and save it without a password."""
+    path = Path(path)
+    if path.suffix.lower() == ".csv":
+        raw = path.read_bytes()
+        for enc in ("utf-8-sig", "cp950", "big5"):
+            try:
+                text = raw.decode(enc)
+                break
+            except UnicodeDecodeError:
+                continue
+        else:
+            raise ShopeeError(f"{path.name}: unknown text encoding")
+        return [[[_text(c) for c in row] for row in csv.reader(io.StringIO(text))]]
+    if path.suffix.lower() == ".xls":
+        try:
+            import xlrd
+        except ImportError:
+            raise ShopeeError(f"{path.name} is an old .xls file: open it in Excel and save it as .xlsx")
+        book = xlrd.open_workbook(str(path))
+        return [[[_text(c) for c in sh.row_values(i)] for i in range(sh.nrows)] for sh in book.sheets()]
+    import openpyxl
+    import zipfile
+    try:
+        wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    except (zipfile.BadZipFile, OSError, KeyError, ValueError) as exc:
+        if not password:
+            raise ShopeeError(f"{path.name} could not be opened ({exc.__class__.__name__}) - if it is Shopee's "
+                              "password-protected report: put the password in SHOPEE_EXPORT_PASSWORD, or open it in "
+                              "Excel and save it without a password")
+        try:
+            import msoffcrypto
+        except ImportError:
+            raise ShopeeError(f"{path.name} is password protected: .venv\\Scripts\\python -m pip install "
+                              "msoffcrypto-tool (or open it in Excel and save it without a password)")
+        buf = io.BytesIO()
+        with open(path, "rb") as f:
+            office = msoffcrypto.OfficeFile(f)
+            office.load_key(password=password)
+            office.decrypt(buf)
+        buf.seek(0)
+        wb = openpyxl.load_workbook(buf, read_only=True, data_only=True)
+    sheets = [[[_text(c) for c in row] for row in ws.iter_rows(values_only=True)] for ws in wb.worksheets]
+    wb.close()
+    return sheets
+
+
+def _find(headers: list, words, avoid=()) -> Optional[int]:
+    """The column whose header contains the first of `words` that any header contains (words in order of
+    preference)."""
+    low = [h.lower() for h in headers]
+    for w in words:
+        for i, h in enumerate(low):
+            if w in h and not any(a in h for a in avoid):
+                return i
+    return None
+
+
+def _table(rows: list):
+    """(header, data rows) - the header is the row (of the first 10) that names an order id or a product id."""
+    for i, r in enumerate(rows[:10]):
+        if _find(r, ORDER_ID) is not None or _find(r, ITEM_ID) is not None:
+            return r, rows[i + 1:]
+    return None, []
+
+
+def _number(text: str) -> Optional[float]:
+    t = re.sub(r"[^\d.\-]", "", text or "")
+    try:
+        return float(t) if t not in ("", "-", ".") else None
+    except ValueError:
+        return None
+
+
+def order_state(text: str) -> str:
+    """completed / cancelled / returned / open, from Shopee's order status (訂單狀態)."""
+    t = (text or "").lower()
+    if any(w in t for w in ("不成立", "取消", "cancel")):
+        return "cancelled"
+    if any(w in t for w in ("退貨", "退款", "return", "refund")):
+        return "returned"
+    if any(w in t for w in ("已完成", "完成", "completed")):
+        return "completed"
+    return "open"
+
+
+def _codes_in(cells: list, codes: list) -> Optional[str]:
+    text = " ".join(cells)
+    hits = [c for c in codes if c in text]
+    return max(hits, key=len) if hits else None
+
+
+def sync(cfg: Config, files: list) -> dict:
+    """Read Shopee's order report(s) and product list(s): match every row to a set by its code, then record item ids,
+    links, orders, reserved / sold. Returns {"lines": [what changed], "takedown": [...], "read": [files]}."""
+    res = {"lines": [], "takedown": [], "read": [], "problems": []}
+    orders, products = {}, {}
+    sets_now = refresh_sets(cfg)                 # every set known, even before the first upload file
+    codes = sorted((s["set_code"] for s in sets_now), key=len, reverse=True)
+    for f in files:
+        try:
+            sheets = read_report(Path(f), cfg.shopee_export_password)
+        except ShopeeError as exc:
+            res["problems"].append(str(exc))
+            continue
+        res["read"].append(f)
+        for rows in sheets:
+            header, data = _table(rows)
+            if header is None:
+                continue
+            oid = _find(header, ORDER_ID)
+            if oid is not None:
+                col = {"status": _find(header, ("訂單狀態", "order status", "status")),
+                       "price": _find(header, ("商品總價", "商品活動價格", "商品原價", "訂單小計", "product subtotal",
+                                               "deal price", "price"), avoid=("運費", "shipping")),
+                       "tracking": _find(header, ("包裹查詢號碼", "物流追蹤", "tracking")),
+                       "created": _find(header, ("訂單成立", "order creation", "create time")),
+                       "done": _find(header, ("訂單完成時間", "完成時間", "order complete", "completed time")),
+                       "payout": _find(header, ("實收", "撥款金額", "入帳金額", "payout", "escrow"))}
+                fee_cols = [i for i, h in enumerate(header)
+                            if any(w in h.lower() for w in ("手續費", "服務費", "處理費", "fee"))]
+                for r in data:
+                    code = _codes_in(r, codes)
+                    if not code or oid >= len(r) or not r[oid]:
+                        continue
+
+                    def cell(k):
+                        i = col[k]
+                        return r[i] if i is not None and i < len(r) else ""
+                    fees = sum(_number(r[i]) or 0 for i in fee_cols if i < len(r))
+                    orders[(code, r[oid])] = {"sn": r[oid], "status": cell("status"), "price": cell("price"),
+                                              "tracking": cell("tracking"), "created": cell("created"),
+                                              "done": cell("done"), "payout": cell("payout"),
+                                              "fees": f"{fees:g}" if fee_cols else ""}
+                continue
+            iid = _find(header, ITEM_ID)
+            st = _find(header, ("狀態", "status"))
+            for r in data:
+                code = _codes_in(r, codes)
+                if code and iid < len(r) and re.fullmatch(r"\d+", r[iid] or ""):
+                    products[code] = {"item_id": r[iid], "status": r[st] if st is not None and st < len(r) else ""}
+    if not orders and not products:
+        return res
+    stamp = now_text()
+    with store.locked(cfg.csv_path), store.locked(cfg.sets_path), store.locked(cfg.listings_path):
+        books = store.read_rows(cfg.csv_path)
+        sets = store.read_table(cfg.sets_path)
+        listings = store.read_table(cfg.listings_path)
+        by_code = {s["set_code"]: s for s in sets}
+        for code, p in products.items():
+            s = by_code[code]
+            li = _listing(listings, code) or _new_listing(listings, code)
+            li["shopee_item_id"] = p["item_id"]
+            li["shopee_sku"] = code
+            li["url"] = li.get("url") or item_url(cfg.shopee_shop_id, p["item_id"])
+            li["last_synced_at"] = stamp
+            t = p["status"].lower()
+            gone = any(w in t for w in ("下架", "unlist", "delist", "hidden"))
+            banned = any(w in t for w in ("違規", "禁止", "banned", "刪除", "deleted"))
+            if li.get("status") == "sold":
+                continue
+            if gone or banned:
+                if li.get("status") != ("rejected" if banned else "delisted"):
+                    li["status"], li["delisted_at"] = ("rejected" if banned else "delisted"), stamp
+                    if s["status"] in ("listed", "ready"):
+                        apply_set_status(s, "withdrawn", books_of(cfg, code, books))
+                        s["errors"] = (f"{'removed by Shopee' if banned else 'taken off Shopee'} - to sell it again: "
+                                       f"python -m pipeline set-status {code} ready")
+                    res["lines"].append(f"{code}: {'removed by Shopee' if banned else 'not on sale on Shopee'} "
+                                        f"({p['status']})")
+                continue
+            if li.get("status") != "live":
+                li["status"], li["listed_at"] = "live", li.get("listed_at") or stamp
+                res["lines"].append(f"{code}: on Shopee, item {p['item_id']}")
+            if s["status"] in ("ready", "draft"):
+                apply_set_status(s, "listed", books_of(cfg, code, books))
+        rank = {"completed": 3, "returned": 2, "open": 1, "cancelled": 0}
+        best = {}
+        for (code, sn), o in orders.items():
+            o["state"] = order_state(o["status"])
+            if code not in best or rank[o["state"]] > rank[best[code]["state"]]:
+                best[code] = o
+        for code, o in best.items():
+            s = by_code[code]
+            group = books_of(cfg, code, books)
+            li = _listing(listings, code) or _new_listing(listings, code)
+            li["last_synced_at"] = stamp
+            li["shopee_sku"] = code
+            state = o["state"]
+            if state == "cancelled":
+                if li.get("shopee_order_sn") == o["sn"] and s["status"] == "reserved":
+                    apply_set_status(s, "listed", group)
+                    li["status"] = "live"
+                    li["shopee_order_sn"], li["shopee_order_status"] = "", f"{o['sn']} {o['status']}"
+                    s["errors"] = ""
+                    res["lines"].append(f"{code}: order {o['sn']} cancelled - on sale again")
+                continue
+            before = (s["status"], li.get("shopee_order_status"))
+            li.update({"shopee_order_sn": o["sn"], "shopee_order_status": o["status"],
+                       "shopee_tracking_no": o["tracking"] or li.get("shopee_tracking_no", ""),
+                       "shopee_fees": o["fees"] or li.get("shopee_fees", ""),
+                       "shopee_payout": o["payout"] or li.get("shopee_payout", "")})
+            if state == "completed":
+                li["status"] = "sold"
+                if s["status"] != "sold":
+                    apply_set_status(s, "sold", group)
+                    price = _number(o["price"])
+                    s.update({"sold_on": PLATFORM, "sold_at": o["done"] or o["created"] or stamp,
+                              "sold_price": f"{price:g}" if price is not None else s.get("set_price", ""),
+                              "errors": ""})
+                    res["lines"].append(f"{code}: SOLD on Shopee (order {o['sn']})")
+                    for other in _other_active(listings, code):
+                        other["status"], other["delisted_at"] = "delisted", stamp
+                        res["takedown"].append(f"{code} sold on Shopee: take it down on {other['platform']}"
+                                               + (f" {other['url']}" if other.get("url") else ""))
+            else:
+                if li.get("status") in ("exported", "", None):
+                    li["status"], li["listed_at"] = "live", li.get("listed_at") or stamp
+                if s["status"] != "sold" or state == "returned":
+                    apply_set_status(s, "reserved", group)
+                s["errors"] = (f"Shopee order {o['sn']}: {o['status']} (return / refund) - when the books are back: "
+                               f"python -m pipeline set-status {code} ready") if state == "returned" else ""
+                if before != (s["status"], li.get("shopee_order_status")):
+                    res["lines"].append(f"{code}: ordered on Shopee (order {o['sn']}, {o['status']})")
+            s["updated_at"] = stamp
+        store.write_rows(cfg.csv_path, books)
+        store.write_table(cfg.sets_path, sets, store.SET_COLUMNS)
+        store.write_table(cfg.listings_path, listings, store.LISTING_COLUMNS)
+    return res
+
+
+def set_link(cfg: Config, code: str, url: str) -> dict:
+    """You published a set and pasted its Shopee link: its item id and link are saved, and it counts as on sale."""
+    shop, item = parse_url(url)
+    if not item:
+        raise ShopeeError("That is not a Shopee product link (it should look like shopee.tw/...-i.123.456)")
+    stamp = now_text()
+    with store.locked(cfg.csv_path), store.locked(cfg.sets_path), store.locked(cfg.listings_path):
+        books = store.read_rows(cfg.csv_path)
+        sets = store.read_table(cfg.sets_path)
+        listings = store.read_table(cfg.listings_path)
+        s = next((x for x in sets if x["set_code"] == code), None)
+        if s is None:
+            raise ShopeeError(f"set {code} not found")
+        li = _listing(listings, code) or _new_listing(listings, code)
+        li.update({"url": url.strip(), "shopee_item_id": item, "shopee_sku": code, "updated_at": stamp})
+        if li.get("status") not in ("sold",):
+            li["status"], li["listed_at"] = "live", li.get("listed_at") or stamp
+        if s["status"] in ("ready", "draft", "withdrawn"):
+            apply_set_status(s, "listed", books_of(cfg, code, books))
+        s["updated_at"] = stamp
+        store.write_rows(cfg.csv_path, books)
+        store.write_table(cfg.sets_path, sets, store.SET_COLUMNS)
+        store.write_table(cfg.listings_path, listings, store.LISTING_COLUMNS)
+    return dict(li)
+
+
+# ---- the whole thing (shopee.bat) ---------------------------------------------------------------
+def import_files(cfg: Config) -> list:
+    d = cfg.shopee_import
+    if not d.exists():
+        return []
+    return sorted(p for p in d.iterdir() if p.is_file() and p.suffix.lower() in (".xlsx", ".xls", ".csv")
+                  and not p.name.startswith("~$"))
+
+
+def run(cfg: Config, files=None, do_export: bool = True, redo=(), client=None) -> dict:
+    """1. read Shopee's files (given, or everything in data/listings/shopee/import - moved to import/done after),
+    2. make the upload file for the ready sets. Returns {"sync": ..., "export": ..., "text": [lines to show]}."""
+    cfg.shopee_import.mkdir(parents=True, exist_ok=True)
+    from_folder = files is None
+    files = import_files(cfg) if from_folder else [Path(f) for f in files]
+    out = {"sync": None, "export": None, "text": []}
+    t = out["text"]
+    if files:
+        res = out["sync"] = sync(cfg, files)
+        t.append(f"Read {len(res['read'])} Shopee file(s):")
+        t += [f"  {line}" for line in res["lines"]] or ["  nothing new for any set"]
+        t += [f"  TAKE DOWN: {x}" for x in res["takedown"]]
+        t += [f"  PROBLEM: {x}" for x in res["problems"]]
+        if from_folder:
+            done = cfg.shopee_import / "done"
+            done.mkdir(exist_ok=True)
+            for f in res["read"]:
+                shutil.move(str(f), str(done / f"{time.strftime('%Y%m%d-%H%M%S')}_{Path(f).name}"))
+    if do_export:
+        res = out["export"] = export(cfg, redo=redo, client=client)
+        if res["file"]:
+            t.append(f"Upload file for {len(res['made'])} set(s): {res['file']}")
+            t += [f"  {c}" for c in res["made"]]
+            t.append(f"Photos: {res['photos']}\\<set code>")
+            t.append("Next: Seller Center > 我的商品 > 新增商品 > 大量上傳: upload the file. The sets wait under "
+                     "尚未刊登: " + ("check them" if cfg.image_public_url else "add each set's photos (01.jpg first)")
+                     + " and publish. Then double-click shopee.bat again whenever you download a Shopee report.")
+        else:
+            t.append("No set is ready for a new Shopee listing.")
+        t += [f"  NOTE: {n}" for n in res["notes"]]
+        if res["drafts"]:
+            t.append(f"{len(res['drafts'])} set(s) not ready yet:")
+            t += [f"  {code}: {why}" for code, why in res["drafts"]]
+    return out

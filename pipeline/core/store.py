@@ -13,9 +13,29 @@ COLUMNS = [
     "sku", "batch", "set_id", "position", "isbn13", "title", "author", "publisher", "year", "pages", "genre",
     "condition", "price", "currency", "price_basis",
     "market_price", "market_currency", "market_source", "market_url", "market_match", "market_isbn", "front_photo", "set_photo",
-    "barcode_photo", "status", "errors", "book_source", "created_at", "trademe_id", "ebay_id", "fb_status", "notes",
+    "barcode_photo", "status", "errors", "book_source", "created_at", "notes",
 ]
-# status: needs_manual -> enriched -> validated -> listed -> sold   (meanings: pipeline/core/validate.py and README)
+# status: needs_manual -> enriched -> to_check -> validated -> listed -> sold   (meanings: pipeline/core/validate.py)
+# A book belongs to the set batch + set_id; that set's code is "<batch>-<set_id>" - the start of the book's sku.
+
+# data/sets.csv - one row per set, the same whatever platform it is sold on (pipeline/apps/sets.py)
+SET_COLUMNS = [
+    "set_code", "book_count", "set_title", "set_price", "currency", "weight_g", "length_cm", "width_cm", "height_cm",
+    "description", "images", "status", "errors", "sold_on", "sold_at", "sold_price", "custom", "created_at",
+    "updated_at", "notes",
+]
+# data/listings.csv - one row per set per platform (pipeline/apps/shopee.py). Columns in groups: every platform, then
+# one group per platform (a Facebook Marketplace group can be added later the same way: fb_...).
+LISTING_COMMON = [
+    "set_code", "platform", "status", "title", "price", "currency", "url", "export_file", "exported_at", "listed_at",
+    "updated_at", "delisted_at", "last_synced_at", "errors",
+]
+LISTING_SHOPEE = [
+    "shopee_item_id", "shopee_sku", "shopee_category_id", "shopee_condition", "shopee_logistics",
+    "shopee_days_to_ship", "shopee_order_sn", "shopee_order_status", "shopee_tracking_no", "shopee_fees",
+    "shopee_payout",
+]
+LISTING_COLUMNS = LISTING_COMMON + LISTING_SHOPEE
 
 
 class FileBusy(RuntimeError):
@@ -75,13 +95,19 @@ def locked(path, timeout: float = 30.0):
         f.close()
 
 
-def read_rows(path) -> list:
+def read_table(path, upgrade=None) -> list:
+    """All rows of a CSV file as dicts ([] if it does not exist yet)."""
     path = Path(path)
     with locked(path):
         if not path.exists():
             return []
         with open(path, newline="", encoding="utf-8-sig") as f:
-            return [_upgrade(dict(r)) for r in csv.DictReader(f)]
+            return [upgrade(dict(r)) if upgrade else dict(r) for r in csv.DictReader(f)]
+
+
+def read_rows(path) -> list:
+    """The books (data/books.csv)."""
+    return read_table(path, _upgrade)
 
 
 def _upgrade(r: dict) -> dict:
@@ -101,17 +127,18 @@ def _upgrade(r: dict) -> dict:
     return r
 
 
-def write_rows(path, rows: list) -> None:
+def write_table(path, rows: list, columns: list) -> None:
+    """Write all rows (only `columns`, in that order). Atomic: a crash never leaves a half-written file."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     with locked(path):
         fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
         with os.fdopen(fd, "w", newline="", encoding="utf-8-sig") as f:
-            w = csv.DictWriter(f, fieldnames=COLUMNS, extrasaction="ignore", restval="")
+            w = csv.DictWriter(f, fieldnames=columns, extrasaction="ignore", restval="")
             w.writeheader()
             for r in rows:
-                w.writerow({c: ("" if r.get(c) is None else r.get(c)) for c in COLUMNS})
-        for attempt in range(20):  # atomic: a crash never leaves a half-written CSV
+                w.writerow({c: ("" if r.get(c) is None else r.get(c)) for c in columns})
+        for attempt in range(20):
             try:
                 os.replace(tmp, path)
                 return
@@ -119,6 +146,19 @@ def write_rows(path, rows: list) -> None:
                 time.sleep(0.25)
         os.remove(tmp)
         raise FileBusy(f"Could not save {path.name}: it is open in another program (Excel?). Close it and try again.")
+
+
+def write_rows(path, rows: list) -> None:
+    write_table(path, rows, COLUMNS)
+
+
+def update_table(path, columns: list, change: Callable[[list], object], upgrade=None):
+    """Like update_rows, for any of the CSV files (sets.csv, listings.csv)."""
+    with locked(path):
+        rows = read_table(path, upgrade)
+        result = change(rows)
+        write_table(path, rows, columns)
+        return result
 
 
 def update_rows(path, change: Callable[[list], object]):

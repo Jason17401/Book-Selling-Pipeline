@@ -21,7 +21,7 @@ def cfg(tmp_path):
          "author": "A", "condition": "like_new", "price": "5", "currency": "NZD", "front_photo": str(front),
          "barcode_photo": str(barcode), "status": "validated"},
         {"sku": "b-S01-06", "batch": "b", "set_id": "S01", "position": "6", "front_photo": str(front),
-         "barcode_photo": str(barcode), "status": "needs_manual", "trademe_id": "keep-me"},
+         "barcode_photo": str(barcode), "status": "needs_manual", "created_at": "keep-me"},
     ]
     store.write_rows(c.csv_path, rows)
     return c
@@ -45,7 +45,7 @@ def test_condition_and_price_are_required(cfg):
     r = editing.save_row(cfg, "b-S01-06", {"condition": "like_new", "price": "150", "currency": "TWD"})
     assert r["status"] == "validated" and not r["issues"]
     rows = {x["sku"]: x for x in store.read_rows(cfg.csv_path)}
-    assert rows["b-S01-06"]["trademe_id"] == "keep-me" and "manual" in rows["b-S01-06"]["book_source"]
+    assert rows["b-S01-06"]["created_at"] == "keep-me" and "manual" in rows["b-S01-06"]["book_source"]
     assert rows["b-S01-05"]["title"] == "Done"                              # other book untouched
 
 
