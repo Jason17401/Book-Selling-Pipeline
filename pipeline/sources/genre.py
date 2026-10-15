@@ -8,6 +8,12 @@ from __future__ import annotations
 
 import re
 
+SEP = " > "         # how genres are joined in books.csv: broadest first, e.g. "童書 > 冒險／驚悚小說"
+# What separates genres in text from a source or typed by hand: > (and look-alikes), | and ; - but never "/" or "／"
+# (books.com.tw and eslite use them INSIDE one category name, e.g. 冒險／驚悚小說), never "," ("Body, Mind & Spirit"
+# is one Google category) and never a space (many genres are several words).
+SPLIT = r"\s*(?:>|＞|›|»|\||｜|;|；)\s*"
+
 NOT_GENRE = {"首頁", "home", "博客來", "誠品線上", "誠品", "全站分類", "中文書", "繁體書", "簡體書", "外文書", "電子書",
              "二手書", "書籍", "圖書", "book", "books", "general", "全部", "全部分類", "商品分類", "分類", "其他",
              "本書分類", "購物車", "中文出版品"}
@@ -33,7 +39,7 @@ def from_parts(parts, title: str = "") -> str:
         parts = [p for p in parts if not (len(re.sub(r"\W+", "", p)) > 3 and re.sub(r"\W+", "", p).lower() in t)]
     if not parts:
         return ""
-    return parts[0] if len(parts) == 1 else f"{parts[0]} > {parts[-1]}"
+    return parts[0] if len(parts) == 1 else join_genres([parts[0], parts[-1]])
 
 
 def from_path(text: str, sep: str = r"\s*(?:/|>|›|»|＞)\s*", title: str = "") -> str:
@@ -47,3 +53,18 @@ def from_subjects(text: str) -> str:
     first = re.split(r"\s*(?:--|－－|—)\s*", first)[0]
     first = re.sub(r"^\s*\d+[.)]\s*", "", first)          # '1. 兒童小說'
     return first.strip(" .;")
+
+
+def split_genres(text: str) -> list:
+    """'童書 > 冒險／驚悚小說' -> ['童書', '冒險／驚悚小說'] (each genre once, empty bits dropped)."""
+    out = []
+    for g in re.split(SPLIT, text or ""):
+        g = re.sub(r"\s+", " ", g).strip()
+        if g and g not in out:
+            out.append(g)
+    return out
+
+
+def join_genres(genres) -> str:
+    """['童書', '冒險／驚悚小說'] -> '童書 > 冒險／驚悚小說' (the way books.csv stores them)."""
+    return SEP.join(split_genres(SEP.join(str(g) for g in genres)))

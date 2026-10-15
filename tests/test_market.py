@@ -119,7 +119,7 @@ def test_review_window_actions(tmp_path):
 @pytest.mark.parametrize("bad", ["abc"])
 def test_bad_market_price_is_flagged(tmp_path, bad):
     from pipeline.core.validate import row_issues
-    issues = row_issues({"isbn13": ISBN, "title": "T", "author": "A", "barcode_photo": "", "market_price": bad},
+    issues = row_issues({"isbn13": ISBN, "title": "T", "author": "A", "back_photo": "", "market_price": bad},
                         cfg_for(tmp_path))
     assert any(i["field"] == "market_price" for i in issues)
 
@@ -476,7 +476,7 @@ def test_max_price_default_allows_twd():
     cfg = Config()
     assert cfg.max_price == 500
     r = {"isbn13": OOP, "title": "T", "author": "A", "condition": "like_new", "price": "450", "currency": "TWD",
-         "barcode_photo": "x"}
+         "back_photo": "x"}
     assert not [i for i in row_issues(r, cfg) if i["field"] == "price"]
 
 

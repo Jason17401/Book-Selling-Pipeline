@@ -51,16 +51,13 @@ COLUMN_WORDS = [
     ("price", ("價格", "price")),
     ("stock", ("庫存", "stock")),
     ("weight", ("重量", "weight")),
-    ("length", ("長度", "length")),
-    ("width", ("寬度", "width")),
-    ("height", ("高度", "height")),
     ("days_to_ship", ("備貨", "出貨天數", "days to ship", "days_to_ship", "pre-order", "preorder", "pre_order")),
     ("condition", ("保存狀況", "商品狀況", "condition")),
 ]
 DELIVERY_WORDS = ("7-eleven", "7-11", "全家", "萊爾富", "ok mart", "ok便利", "ok超商", "店到店", "店到家", "宅配", "黑貓",
                   "新竹", "郵局", "郵政", "嘉里", "隔日到貨", "物流", "logistic", "channel")
 PLAIN_HEADER = ["分類代碼", "商品名稱", "商品描述", "主商品貨號", "價格", "庫存", "主商品圖片"] + \
-               [f"商品圖片 {i}" for i in range(1, 9)] + ["重量", "長度", "寬度", "高度", "較長備貨天數", "商品保存狀況"]
+               [f"商品圖片 {i}" for i in range(1, 9)] + ["重量", "較長備貨天數", "商品保存狀況"]
 
 
 def _text(v) -> str:
@@ -80,12 +77,19 @@ def column_field(header: str) -> str:
     return ""
 
 
+def _is_name_header(text: str) -> bool:
+    """The product-name column's header itself (商品名稱 / Product Name / Shopee's key ps_product_name|1|0) - not an
+    explanation row that merely mentions 商品名稱."""
+    t = text.strip().lower()
+    return t in ("商品名稱", "product name", "product_name") or t.startswith(("ps_product_name", "product_name|"))
+
+
 def _layout(ws):
     """(column texts {col: header text}, first data row) of the upload sheet. The header is every row (of the first
     12) with a 商品名稱 / Product Name / product_name cell - Shopee's templates have a row of their own keys and a row
     of names - and data starts at the first empty row after the explanation rows below them."""
     rows = [list(r) for r in ws.iter_rows(min_row=1, max_row=12, values_only=True)]
-    heads = [i for i, r in enumerate(rows) if any(column_field(_text(c)) == "name" for c in r)]
+    heads = [i for i, r in enumerate(rows) if any(_is_name_header(_text(c)) for c in r)]
     if not heads:
         return None, None
     cols = {}
@@ -99,13 +103,40 @@ def _layout(ws):
     return cols, start + 1
 
 
+def open_workbook(path, **kw):
+    """openpyxl.load_workbook that also opens Shopee's own files: their sheets say activePane="bottom_left" where the
+    file format says "bottomLeft", which openpyxl refuses (Excel doesn't mind). Fixed in memory; the file is untouched."""
+    import openpyxl
+    import zipfile
+    fixes = {b'"bottom_left"': b'"bottomLeft"', b'"bottom_right"': b'"bottomRight"', b'"top_left"': b'"topLeft"',
+             b'"top_right"': b'"topRight"'}
+    buf = io.BytesIO()
+    with zipfile.ZipFile(path) as zin, zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zout:
+        for info in zin.infolist():
+            data = zin.read(info.filename)
+            if info.filename.startswith("xl/worksheets/") and info.filename.endswith(".xml"):
+                for bad, good in fixes.items():
+                    data = data.replace(b'activePane=' + bad, b'activePane=' + good)
+            zout.writestr(info, data)
+    buf.seek(0)
+    return openpyxl.load_workbook(buf, **kw)
+
+
 def _upload_sheet(wb):
+    """(sheet, columns, first data row) of the sheet to fill: Shopee's 上傳模板 (upload template) - never its example
+    sheet 參考範例, which has the same headers."""
     best = None
     for ws in wb.worksheets:
+        name = ws.title.lower()
+        if any(w in name for w in ("範例", "example", "sample", "說明", "guide")):
+            continue
         cols, start = _layout(ws)
-        if cols and (best is None or len(cols) > len(best[1])):
-            best = (ws, cols, start)
-    return best
+        if not cols:
+            continue
+        rank = (any(w in name for w in ("上傳", "upload", "template", "模板")), len(cols))
+        if best is None or rank > best[0]:
+            best = (rank, ws, cols, start)
+    return best[1:] if best else None
 
 
 def find_template(cfg: Config) -> Optional[Path]:
@@ -120,7 +151,7 @@ def find_template(cfg: Config) -> Optional[Path]:
 
 def find_category(cfg: Config, wb) -> tuple:
     """(category id, candidates) - SHOPEE_CATEGORY_ID, or the one category in the template's category list whose name
-    contains SHOPEE_CATEGORY_NAME (default 二手書)."""
+    contains SHOPEE_CATEGORY_NAME (default 其他書籍 = Books & Magazines > Books > Other Books, 101573)."""
     if cfg.shopee_category_id:
         return cfg.shopee_category_id, []
     found = {}
@@ -144,7 +175,7 @@ def fill_upload(cfg: Config, items: list, out: Path, template: Optional[Path], c
     import openpyxl
     notes = []
     if template is not None:
-        wb = openpyxl.load_workbook(template)
+        wb = open_workbook(template)
         found = _upload_sheet(wb)
         if found is None:
             raise ShopeeError(f"{template.name}: no sheet with a 商品名稱 (product name) column - is it Shopee's "
@@ -175,7 +206,7 @@ def fill_upload(cfg: Config, items: list, out: Path, template: Optional[Path], c
         for j, f in sorted(fields.items()):
             value = None
             if f == "category":
-                value = int(category) if category.isdigit() else category
+                value = (int(category) if category.isdigit() else category) or None
             elif f == "name":
                 value = it["title"]
             elif f == "description":
@@ -193,8 +224,6 @@ def fill_upload(cfg: Config, items: list, out: Path, template: Optional[Path], c
             elif f == "weight" and it.get("weight_g"):
                 g = float(it["weight_g"])
                 value = int(round(g)) if in_grams else round(g / 1000, 2)
-            elif f in ("length", "width", "height") and it.get(f + "_cm"):
-                value = int(round(float(it[f + "_cm"])))
             elif f == "days_to_ship" and cfg.shopee_days_to_ship:
                 value = int(cfg.shopee_days_to_ship) if cfg.shopee_days_to_ship.isdigit() else cfg.shopee_days_to_ship
             elif f == "condition":
@@ -280,17 +309,16 @@ def export(cfg: Config, redo=(), client=None) -> dict:
     template = find_template(cfg)
     wb = None
     if template is not None:
-        import openpyxl
-        wb = openpyxl.load_workbook(template, read_only=True)
+        wb = open_workbook(template)        # not read_only: Shopee's files give wrong sheet sizes
     category, candidates = find_category(cfg, wb)
     if wb is not None:
         wb.close()
-    if not category:
-        msg = ("Set SHOPEE_CATEGORY_ID in .env to the 分類代碼 (category code) of the category your sets go in - "
-               "it is in the category list of Shopee's template.")
+    if not category:                 # optional in Shopee's template: Shopee then suggests one for each set
+        note = ("No category given: Shopee suggests one for each set under 尚未刊登 - check it there (or set "
+                "SHOPEE_CATEGORY_ID in .env to always use one)")
         if candidates:
-            msg += f" Categories containing '{cfg.shopee_category_name}':\n  " + "\n  ".join(candidates[:15])
-        raise ShopeeError(msg)
+            note += f". Categories containing '{cfg.shopee_category_name}': " + "; ".join(candidates[:10])
+        res["notes"].append(note)
     books = store.read_rows(cfg.csv_path)
     items = []
     for s in todo:
@@ -302,8 +330,7 @@ def export(cfg: Config, redo=(), client=None) -> dict:
         paths = make_set_images(code, group, cfg, cfg.listings_dir / "photos" / code, cfg.shopee_max_images)
         urls = upload_images(cfg, code, paths, client)
         items.append({"code": code, "title": s["set_title"], "description": s["description"],
-                      "price": s["set_price"], "weight_g": s.get("weight_g"), "length_cm": s.get("length_cm"),
-                      "width_cm": s.get("width_cm"), "height_cm": s.get("height_cm"), "image_urls": urls,
+                      "price": s["set_price"], "weight_g": s.get("weight_g"), "image_urls": urls,
                       "images": [str(p) for p in paths]})
     if not items:
         return res

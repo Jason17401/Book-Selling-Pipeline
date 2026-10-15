@@ -81,12 +81,11 @@ class Config:
     bot_timeout: float = 30.0  # seconds the Telegram bot waits for Telegram before retrying (BOT_TIMEOUT)
     settle_seconds: int = 5  # ignore files modified in the last N seconds (still syncing)
     # selling a set (pipeline/apps/sets.py) and Shopee (pipeline/apps/shopee.py)
-    set_discount: float = 0.0          # set price = sum of the books' prices minus this fraction (0.1 = 10% off)
-    set_weight_per_book_g: int = 300   # a set's weight when you have not weighed it: books x this
-    set_box_cm: tuple = (30, 22, 15)   # parcel size (length, width, height in cm) when not given per set
+    set_discount: float = 0.2          # set price = sum of the books' prices minus this fraction (0.2 = 20% off)
+    set_weight_per_book_g: int = 300   # a set's weight for Shopee (required there): books x this, an estimate is fine
     shopee_template: str = ""          # Shopee's bulk-upload template, saved as .xlsx (blank = data/listings/shopee/template.xlsx)
     shopee_category_id: str = ""       # 分類代碼 of the category to list in (blank = search the template for shopee_category_name)
-    shopee_category_name: str = "二手書"
+    shopee_category_name: str = "其他書籍"
     shopee_logistics: tuple = ("7-eleven", "全家", "萊爾富", "ok", "蝦皮店到店")   # delivery options switched on
     shopee_days_to_ship: str = ""      # 較長備貨天數 (blank = Shopee's normal handling time)
     shopee_max_images: int = 9
@@ -203,12 +202,11 @@ class Config:
             decode_effort=e("DECODE_EFFORT", "normal").strip().lower(),
             settle_seconds=int(e("SETTLE_SECONDS", "5")),
             bot_timeout=float(e("BOT_TIMEOUT", "30") or 30),
-            set_discount=_ratio(e("SET_DISCOUNT", "0") or "0"),
+            set_discount=_ratio(e("SET_DISCOUNT", "20%") or "0"),
             set_weight_per_book_g=int(float(e("SET_WEIGHT_PER_BOOK_G", "300") or 300)),
-            set_box_cm=tuple(int(float(x)) for x in (e("SET_BOX_CM", "30,22,15") or "30,22,15").split(",")[:3]),
             shopee_template=e("SHOPEE_TEMPLATE", "").strip(),
             shopee_category_id=e("SHOPEE_CATEGORY_ID", "").strip(),
-            shopee_category_name=e("SHOPEE_CATEGORY_NAME", "二手書").strip(),
+            shopee_category_name=e("SHOPEE_CATEGORY_NAME", "其他書籍").strip(),
             shopee_logistics=_csv(e("SHOPEE_LOGISTICS", "7-ELEVEN,全家,萊爾富,OK,蝦皮店到店")),
             shopee_days_to_ship=e("SHOPEE_DAYS_TO_SHIP", "").strip(),
             shopee_max_images=max(2, int(e("SHOPEE_MAX_IMAGES", "9") or 9)),

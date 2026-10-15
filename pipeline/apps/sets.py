@@ -1,4 +1,4 @@
-"""One marketplace post per set: the numbered front photo (+ optionally each barcode photo) and a text listing every book
+"""One marketplace post per set: the numbered front photo (+ optionally each back photo) and a text listing every book
 by its number. Made only for sets where every book is 'validated'."""
 from __future__ import annotations
 
@@ -127,7 +127,7 @@ def build_set_listings(rows: list, cfg: Config, grid=None, set_price=None, set_c
         if with_backs:
             for b in books:
                 dst = d / f"{len(files) + 1:02d}_book{int(b['position']):02d}_barcode.jpg"
-                stamp_number(b["barcode_photo"], dst, int(b["position"]))
+                stamp_number(b["back_photo"], dst, int(b["position"]))
                 files.append(dst.name)
         bundle = money(set_price, set_currency or cfg.default_currency) if set_price is not None else ""
         sums = totals(books)
@@ -164,7 +164,8 @@ SET_STATUS_HELP = {
 }
 MANUAL_STATUSES = ("ready", "listed", "sold", "withdrawn")      # what you may set by hand (set-status / set view)
 ACTIVE_LISTING = ("exported", "live")                          # a listing that is (about to be) on sale
-AUTO_FIELDS = ("set_title", "set_price", "description", "weight_g", "length_cm", "width_cm", "height_cm")
+AUTO_FIELDS = ("set_title", "discount", "set_price", "description", "weight_g")
+# discount and set_price go together: type one, the other follows (the one you typed last is kept in `custom`)
 FOOTER_DEFAULT = ("・整套出售，恕不拆賣。\n"
                   "・皆為二手書，書況如各書所註，以照片為準。\n"
                   "・照片皆為實物拍攝。")
@@ -215,8 +216,28 @@ def ntd(v) -> str:
     return f"NT${f:.0f}" if f == int(f) else f"NT${f:.2f}"
 
 
-def set_price_of(books: list, cfg: Config):
-    """(price of the whole set in TWD, sum of the books' prices), or (None, None) if a book has no TWD price."""
+def pct(value) -> float:
+    """'20', '20%', 20 -> 20.0 (a discount in percent)."""
+    return float(str(value).replace("%", "").strip() or 0)
+
+
+def zhe(discount: float) -> str:
+    """20% off -> '8 折', 15% off -> '85 折' (how a discount is said in Taiwan); '' for an uneven discount like 17.3%
+    or none."""
+    rest = round(100 - discount, 6)
+    if discount <= 0 or rest <= 0 or rest != int(rest):
+        return ""
+    return f"{rest / 10:g} 折" if rest % 10 == 0 else f"{rest:g} 折"
+
+
+def discount_for(price: float, total: float) -> float:
+    """The discount (in %) that makes `total` cost `price`, to one decimal: 1000 -> 800 is 20."""
+    return round((1 - price / total) * 100, 1) if total else 0.0
+
+
+def set_price_of(books: list, discount: float = 0.0):
+    """(price of the whole set in TWD, sum of the books' prices), or (None, None) if a book has no TWD price.
+    discount = percent off the sum (20 = 20% off)."""
     total = 0.0
     for b in books:
         if (b.get("currency") or "").upper() != "TWD":
@@ -225,7 +246,7 @@ def set_price_of(books: list, cfg: Config):
             total += float(b.get("price") or "x")
         except ValueError:
             return None, None
-    price = max(1, int(round(total * (1 - cfg.set_discount))))
+    price = max(1, int(round(total * (1 - discount / 100))))
     return price, total
 
 
@@ -259,7 +280,7 @@ def footer_text(cfg: Config) -> str:
 
 
 def set_description_zh(code: str, books: list, cfg: Config, price=None, total=None, footer: str = "",
-                       limit: int = 3000, images: int = 9) -> str:
+                       limit: int = 3000, images: int = 9, discount: float = 0.0) -> str:
     """The text buyers read: every book by its number on the photo, with title, author, publisher, condition and price
     (and the price of a new copy, LISTING_SHOW_MARKET). Never longer than `limit` characters (Shopee: 3,000)."""
     per = -(-len(books) // max(1, images - 1)) if books else 1
@@ -282,9 +303,10 @@ def set_description_zh(code: str, books: list, cfg: Config, price=None, total=No
             lines.append(p)
         return "\n".join(lines)
     if price is not None:
+        z = f"，整套 {zhe(discount)}" if zhe(discount) else ""
         money_lines = ["──────────", f"整套售價：{ntd(price)}"
-                       + (f"（{len(books)} 本單價合計 {ntd(total)}）" if total is not None and round(total) != price else
-                          f"（= {len(books)} 本單價合計）")]
+                       + ("" if total is None else f"（= {len(books)} 本單價合計）" if round(total) == price
+                          else f"（{len(books)} 本單價合計 {ntd(total)}{z}）")]
     else:
         money_lines = []
     for cut in (60, 30, 15, 8):
@@ -299,14 +321,30 @@ def _set_from_books(s: dict, books: list, cfg: Config) -> None:
     """Fill a set's automatic fields from its books (fields you edited - listed in `custom` - are kept)."""
     custom = set(filter(None, (s.get("custom") or "").split(",")))
     code = s["set_code"]
-    price, total = set_price_of(books, cfg)
+    if "discount" not in custom:
+        s["discount"] = f"{cfg.set_discount * 100:g}"
+    try:
+        discount = pct(s["discount"])
+    except ValueError:
+        discount = cfg.set_discount * 100
+    price, total = set_price_of(books, discount)
+    if "set_price" in custom:                             # you typed the set's price: the discount follows from it
+        try:
+            price = max(1, int(round(float(s["set_price"]))))
+            if total is not None:
+                discount = max(0.0, discount_for(price, total))   # dearer than the books: no discount
+                s["discount"] = f"{discount:g}"
+            else:                                         # a book has no TWD price: no sum to take a discount off
+                discount = 0.0
+                s["discount"] = ""
+        except ValueError:
+            pass
+    s["original_price"] = f"{total:g}" if total is not None else ""
+    s["set_price"] = str(price) if price is not None else ""
     auto = {"set_title": set_title_zh(code, books),
-            "set_price": str(price) if price is not None else "",
             "description": set_description_zh(code, books, cfg, price, total, footer_text(cfg),
-                                              images=cfg.shopee_max_images),
-            "weight_g": str(cfg.set_weight_per_book_g * len(books)),
-            "length_cm": str(cfg.set_box_cm[0]), "width_cm": str(cfg.set_box_cm[1]),
-            "height_cm": str(cfg.set_box_cm[2])}
+                                              images=cfg.shopee_max_images, discount=discount),
+            "weight_g": str(cfg.set_weight_per_book_g * len(books))}
     for k, v in auto.items():
         if k not in custom:
             s[k] = v
@@ -411,8 +449,10 @@ def change_set_status(cfg: Config, code: str, status: str, note: str = "") -> li
 
 
 def save_set_fields(cfg: Config, code: str, fields: dict) -> dict:
-    """You edited a set's title / price / description / weight / size: saved, and remembered as yours (`custom`) so the
-    automatic text no longer replaces it. An empty value goes back to automatic."""
+    """You edited a set's title / discount or price / description / weight: saved, and remembered as yours (`custom`)
+    so the automatic value no longer replaces it. An empty value goes back to automatic. Discount and set price go
+    together: give the discount and the price follows (sum of the books' prices minus it), or give the price and the
+    discount follows."""
     def change(sets):
         s = next((x for x in sets if x["set_code"] == code), None)
         if s is None:
@@ -422,14 +462,22 @@ def save_set_fields(cfg: Config, code: str, fields: dict) -> dict:
             if k not in AUTO_FIELDS + ("notes",):
                 continue
             v = ("" if v is None else str(v)).strip()
-            if k in ("set_price", "weight_g", "length_cm", "width_cm", "height_cm") and v:
-                v = v.replace("NT$", "").replace("$", "").replace(",", "")
-                float(v)                                      # ValueError -> shown to you, nothing saved
-            if (s.get(k) or "") == v:
+            if k in ("weight_g", "set_price") and v:
+                v = v.replace(",", "").replace("NT$", "").replace("$", "")
+                if float(v) <= 0:                             # ValueError -> shown to you, nothing saved
+                    raise ValueError("The price must be more than 0")
+            if k == "discount" and v:
+                d = pct(v)                                    # ValueError -> shown to you, nothing saved
+                if not 0 <= d < 100:
+                    raise ValueError("The discount must be from 0 to 99 (%)")
+                v = f"{d:g}"
+            if (s.get(k) or "") == v and k not in ("discount", "set_price"):
                 continue
             s[k] = v
             if k != "notes":
                 (custom.add if v else custom.discard)(k)
+            if k in ("discount", "set_price"):                # the one typed last decides; the other follows
+                custom.discard("set_price" if k == "discount" else "discount")
         s["custom"] = ",".join(sorted(custom))
         s["updated_at"] = now_text()
         return dict(s)
@@ -463,7 +511,7 @@ def make_set_images(code: str, books: list, cfg: Config, dst: Path, max_images: 
     With more books than photos allowed, several books share a photo. Returns the paths."""
     from PIL import ImageDraw
     from ..photos.decode import load_image
-    from ..photos.grid import _badge, book_cover, font
+    from ..photos.grid import book_cover, draw_pair, font
     from ..photos.segment import load_segments
     dst.mkdir(parents=True, exist_ok=True)
     for old in dst.glob("*.jpg"):
@@ -483,23 +531,20 @@ def make_set_images(code: str, books: list, cfg: Config, dst: Path, max_images: 
     per = -(-len(books) // max(1, max_images - 1))
     for i in range(0, len(books), per):
         group = books[i:i + per]
+        p = dst / f"{len(paths) + 1:02d}.jpg"
+        own = group[0].get("front_back_photo")
+        if per == 1 and own and Path(own).exists():          # made with the cover cut-outs: the same picture
+            _save_small(load_image(own), p)
+            paths.append(p)
+            continue
         canvas = Image.new("RGB", (size, size), "white")
         row_h = size // len(group)
-        dr = ImageDraw.Draw(canvas)
         for j, b in enumerate(group):
-            y = j * row_h
-            pics = [book_cover(b, front, cfg.grid, cfg.region)]
             try:
-                pics.append(load_image(b["barcode_photo"]))
+                back = load_image(b["back_photo"])
             except Exception:
-                pics.append(None)
-            for k, im in enumerate(pics):
-                if im is None:
-                    continue
-                im = ImageOps.contain(im, (size // 2 - 30, row_h - 30))     # front and back the same size
-                canvas.paste(im, (k * size // 2 + (size // 2 - im.width) // 2, y + (row_h - im.height) // 2))
-            _badge(dr, 20, y + 20, int(b["position"]), max(22, min(size // 14, row_h // 6)))
-        p = dst / f"{len(paths) + 1:02d}.jpg"
+                back = None
+            draw_pair(canvas, j * row_h, row_h, book_cover(b, front, cfg.grid, cfg.region), back, int(b["position"]))
         _save_small(canvas, p)
         paths.append(p)
     return paths

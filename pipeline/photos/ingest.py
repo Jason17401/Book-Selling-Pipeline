@@ -1,5 +1,5 @@
 """Shared plumbing for ingesting photos: listing/ordering the inbox, moving files, captions, the run summary.
-The set logic itself (1 front photo + one barcode photo per book) is in setlayout.py."""
+The set logic itself (1 front photo + one back photo per book) is in setlayout.py."""
 from __future__ import annotations
 
 import re
@@ -180,6 +180,6 @@ def format_summary(s: Summary) -> str:
                      f"[{r['condition'] or '-'}, {price}]")
     lines += s.notes
     lines += [f"WARNING: {w}" for w in s.warnings]
-    lines += [f"CHECK THIS: {p} (on each row, the book from the front photo and the barcode photo must match)"
+    lines += [f"CHECK THIS: {p} (on each row, the book from the front photo and the back photo must match)"
               for p in s.review_sheets]
     return "\n".join(lines)

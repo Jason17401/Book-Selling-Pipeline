@@ -31,10 +31,13 @@ def public(r: dict, cfg: Config) -> dict:
         pics.append({"label": "This book (front)", "path": r["front_photo"], "pos": 0})
     elif whole:                                                  # older books: its grid cell of the set photo
         pics.append({"label": "This book (front)", "path": whole, "pos": int(r.get("position") or 0)})
-    if r.get("barcode_photo"):
-        pics.append({"label": "Barcode photo", "path": r["barcode_photo"], "pos": 0})
-    if whole:
-        pics.append({"label": "Whole set", "path": whole, "pos": 0})
+    if r.get("back_photo"):
+        pics.append({"label": "Back photo", "path": r["back_photo"], "pos": 0})
+    if r.get("front_back_photo") and Path(r["front_back_photo"]).exists():
+        pics.append({"label": "Front + back", "path": r["front_back_photo"], "pos": 0})
+    if whole:      # with every book's number on it, and this book outlined
+        pics.append({"label": "Whole set", "path": whole, "pos": 0, "numbered": True,
+                     "mark": int(r.get("position") or 0)})
     done = r.get("status") in DONE
     to_check = not issues and not done and r.get("status") != "validated"
     return {**{k: r.get(k, "") for k in store.COLUMNS}, "issues": issues, "photos": pics,
@@ -86,6 +89,9 @@ def save_row(cfg: Config, sku: str, fields: dict) -> dict:
                 v = normalize(v) or "".join(ch for ch in v if ch.isdigit() or ch in "Xx")  # keep a typo visible
             if k == "price":
                 v = v.replace("$", "").replace(",", "").strip()
+            if k == "genre":
+                from ..sources.genre import join_genres, split_genres
+                v = join_genres(split_genres(v))           # one way of writing them: 童書 > 冒險／驚悚小說
             if k in ("currency", "market_currency"):
                 v = v.upper()
             if k == "market_price":
@@ -181,7 +187,7 @@ def suggestion(cfg: Config, market_price: str, market_currency: str) -> dict:
     return s or {"error": "Type a market price first (a number)."}
 
 
-# ---- sets (the 'Sets & Shopee' window) ------------------------------------------------------------
+# ---- sets (the 'Sell sets' window) -----------------------------------------------------------------
 def list_sets(cfg: Config) -> list:
     """Every set as the set view shows it: data/sets.csv brought up to date, plus its Shopee listing and books."""
     from .sets import books_of, refresh_sets
@@ -223,13 +229,18 @@ def shopee_upload(cfg: Config) -> str:
 
 
 # ---- photos -----------------------------------------------------------------------------------
-def thumbnail_bytes(cfg: Config, path: str, width: int, pos: int = 0) -> bytes:
+def thumbnail_bytes(cfg: Config, path: str, width: int, pos: int = 0, numbered: bool = False, mark: int = 0) -> bytes:
     """A small JPEG of a photo (turned upright, HEIC ok), cached in data/cache/thumbs so big photos load once.
-    pos > 0: only book number `pos`, cut out of the front photo using GRID (nothing is stored for this)."""
+    pos > 0: only book number `pos`, cut out of the front photo using GRID (nothing is stored for this).
+    numbered: the set photo with every book's number on it (where the books were found, segments.json), and book
+    `mark` outlined."""
     from ..photos.grid import crop_book
     p = Path(path)
     st = p.stat()
-    key = hashlib.sha1(f"{p.resolve()}|{st.st_mtime_ns}|{width}|{pos}|{cfg.grid}|{cfg.region}".encode("utf-8")).hexdigest()
+    seg = p.with_name("segments.json")         # books found again ('covers --redo'): numbers move with them
+    seg_time = seg.stat().st_mtime_ns if numbered and seg.exists() else 0
+    key = hashlib.sha1(f"{p.resolve()}|{st.st_mtime_ns}|{width}|{pos}|{numbered}|{mark}|{seg_time}|{cfg.grid}|"
+                       f"{cfg.region}".encode("utf-8")).hexdigest()
     cached = cfg.cache_dir / "thumbs" / f"{key}.jpg"
     if cached.exists():
         return cached.read_bytes()
@@ -237,9 +248,27 @@ def thumbnail_bytes(cfg: Config, path: str, width: int, pos: int = 0) -> bytes:
         im = ImageOps.exif_transpose(im).convert("RGB")
         if pos:
             im = crop_book(im, pos, cfg.grid, cfg.region) or im
+        elif numbered:
+            im = numbered_photo(cfg, p, im, mark)
         im.thumbnail((width, width * 2))
         buf = io.BytesIO()
         im.save(buf, "JPEG", quality=88)
     cached.parent.mkdir(parents=True, exist_ok=True)
     cached.write_bytes(buf.getvalue())
     return buf.getvalue()
+
+
+def numbered_photo(cfg: Config, path: Path, im: Image.Image, mark: int = 0) -> Image.Image:
+    """The set photo with each book's number (as on the review sheet and the listing photo), book `mark` outlined."""
+    from PIL import ImageDraw
+    from ..photos.grid import cell_box, numbered, position_to_cell
+    from ..photos.segment import load_segments
+    segs = load_segments(path.with_name("segments.json"), im.size)
+    boxes = [sg.box for sg in segs] if segs else None
+    out = numbered(im, *cfg.grid, region=cfg.region, boxes=boxes)
+    rows, cols = cfg.grid
+    if 1 <= mark <= rows * cols:
+        box = boxes[mark - 1] if boxes and mark <= len(boxes) else \
+            cell_box(*position_to_cell(mark, rows, cols), rows, cols, im.size, region=cfg.region)
+        ImageDraw.Draw(out).rectangle(box, outline=(37, 99, 235), width=max(4, int(max(im.size) / 250)))
+    return out

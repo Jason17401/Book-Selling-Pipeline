@@ -40,6 +40,9 @@ class _Stable:
     def __or__(self, other):
         return self
 
+    def __add__(self, n):
+        return self._cache.setdefault(f"+{n}", _Stable())
+
 
 class _Bound:
     def __init__(self, owner):
@@ -115,6 +118,12 @@ class QWidget(QObject):
     def setVisible(self, b):
         self._visible = b
 
+    def isHidden(self):
+        return not self._visible
+
+    def findChildren(self, *a):
+        return []
+
 
 class QLabel(QWidget):
     clicked = pyqtSignal()
@@ -132,6 +141,8 @@ class QLabel(QWidget):
 
 class QLineEdit(QWidget):
     textEdited = pyqtSignal(str)
+    textChanged = pyqtSignal(str)
+    returnPressed = pyqtSignal()
 
     def __init__(self, *a):
         super().__init__()
@@ -139,9 +150,13 @@ class QLineEdit(QWidget):
 
     def setText(self, t):
         self._text = t
+        self.textChanged.emit(t)
 
     def text(self):
         return self._text
+
+    def clear(self):
+        self.setText("")
 
 
 class QPlainTextEdit(QWidget):
@@ -336,6 +351,10 @@ class QRunnable:
 class QTimer(QObject):
     timeout = pyqtSignal()
 
+    @staticmethod
+    def singleShot(ms, fn):
+        fn()
+
     def start(self, *a):
         pass
 
@@ -348,22 +367,122 @@ class QPixmap(_Any):
     pass
 
 
+class QPainter(_Any):
+    RenderHint = _Stable()
+
+
+class QSize:
+    def __init__(self, w=0, h=0):
+        self._w, self._h = w, h
+
+    def width(self):
+        return self._w
+
+    def height(self):
+        return self._h
+
+    def expandedTo(self, other):
+        return QSize(max(self._w, other.width()), max(self._h, other.height()))
+
+
+class QSizePolicy(_Any):
+    Policy = _Stable()
+
+
+class QTreeWidgetItem:
+    def __init__(self, texts=None):
+        self._text = {0: (texts or [""])[0]}
+        self._data, self._children, self._parent, self._expanded = {}, [], None, False
+
+    def text(self, col=0):
+        return self._text.get(col, "")
+
+    def setText(self, col, t):
+        self._text[col] = t
+
+    def setData(self, col, role, v):
+        self._data[(col, role)] = v
+
+    def data(self, col, role):
+        return self._data.get((col, role))
+
+    def addChild(self, c):
+        c._parent = self
+        self._children.append(c)
+
+    def child(self, i):
+        return self._children[i]
+
+    def childCount(self):
+        return len(self._children)
+
+    def parent(self):
+        return self._parent
+
+    def setExpanded(self, b):
+        self._expanded = b
+
+    def isExpanded(self):
+        return self._expanded
+
+    def __getattr__(self, name):          # setIcon, setFont, setFlags, setToolTip ...
+        if name.startswith("__"):
+            raise AttributeError(name)
+        return _Any()
+
+
+class QTreeWidget(QWidget):
+    currentItemChanged = pyqtSignal(object, object)
+    itemClicked = pyqtSignal(object, int)
+    itemCollapsed = pyqtSignal(object)
+    itemExpanded = pyqtSignal(object)
+
+    def __init__(self, *a):
+        super().__init__()
+        self._top, self._cur = [], None
+
+    def addTopLevelItem(self, item):
+        self._top.append(item)
+
+    def topLevelItem(self, i):
+        return self._top[i]
+
+    def topLevelItemCount(self):
+        return len(self._top)
+
+    def clear(self):
+        self._top, self._cur = [], None
+
+    def currentItem(self):
+        return self._cur
+
+    def setCurrentItem(self, item):
+        prev, self._cur = self._cur, item
+        if item is not prev:
+            self.currentItemChanged.emit(item, prev)
+
+
 def install(monkeypatch) -> None:
     """Put fake PyQt6 modules in sys.modules (undone automatically after the test)."""
     pkg = types.ModuleType("PyQt6")
     core, gui, widgets = (types.ModuleType(f"PyQt6.{n}") for n in ("QtCore", "QtGui", "QtWidgets"))
+    core.QEvent = _Stable()
     for name in ("QObject", "QRunnable", "QThreadPool", "QTimer", "pyqtSignal", "pyqtSlot"):
         setattr(core, name, globals()[name])
     core.Qt = _Stable()
-    core.QUrl = _Any
-    for name in ("QPixmap", "QShortcut"):
+    core.QUrl = core.QRect = core.QPoint = _Any
+    core.QSize = QSize
+    for name in ("QPixmap", "QShortcut", "QPainter"):
         setattr(gui, name, globals()[name])
-    gui.QColor = gui.QIcon = gui.QKeySequence = _Any
+    gui.QColor = gui.QIcon = gui.QKeySequence = gui.QFont = gui.QPen = _Any
     gui.QDesktopServices = _Any()
     for name in ("QWidget", "QLabel", "QLineEdit", "QPlainTextEdit", "QComboBox", "QPushButton", "QCheckBox",
-                 "QListWidget", "QListWidgetItem", "QMessageBox"):
+                 "QListWidget", "QListWidgetItem", "QMessageBox", "QTreeWidget", "QTreeWidgetItem", "QSizePolicy"):
         setattr(widgets, name, globals()[name])
-    for name in ("QHBoxLayout", "QVBoxLayout", "QFormLayout"):
+    widgets.QToolButton = type("QToolButton", (QPushButton,), {})
+    widgets.QStyledItemDelegate = _Any
+    widgets.QFrame = type("QFrame", (QWidget,), {})
+    for name in ("QHBoxLayout", "QVBoxLayout", "QFormLayout", "QLayout"):
         setattr(widgets, name, _Layout)
     for name in ("QApplication", "QDialog", "QGroupBox", "QMainWindow", "QScrollArea", "QSplitter", "QToolBar"):
         setattr(widgets, name, type(name, (QWidget,), {}))

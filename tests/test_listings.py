@@ -17,7 +17,7 @@ def _rows(tmp_path, prices):
         book_back(TW_ISBNS[i], size=(300, 400)).save(bc)
         rows.append({"sku": f"x-S01-{i:02d}", "batch": "x", "set_id": "S01", "position": str(i), "isbn13": TW_ISBNS[i],
                      "title": f"Title {i}", "author": "A", "price": price, "currency": cur,
-                     "condition": "good" if i == 1 else "", "front_photo": str(front), "barcode_photo": str(bc),
+                     "condition": "good" if i == 1 else "", "front_photo": str(front), "back_photo": str(bc),
                      "status": "validated"})
     return rows
 

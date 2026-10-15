@@ -50,7 +50,7 @@ def cfg(tmp_path):
     front, barcode = set_dir / "front.jpg", set_dir / "06" / "barcode.jpg"
     set_front().save(front)
     book_back(TW_ISBNS[5], size=(300, 400)).save(barcode)
-    photos = {"front_photo": str(front), "barcode_photo": str(barcode)}
+    photos = {"front_photo": str(front), "back_photo": str(barcode)}
     store.write_rows(c.csv_path, [
         {"sku": "b-S01-05", "batch": "b", "set_id": "S01", "position": "5", "isbn13": TW_ISBNS[4], "title": "Done",
          "author": "A", "condition": "like_new", "price": "5", "currency": "NZD", "status": "validated", **photos},
@@ -65,7 +65,10 @@ def cfg(tmp_path):
 def test_fix_a_book_and_save(gui, cfg):
     w = gui.ReviewWindow(cfg)
     gui.settle()
-    assert w.list.count() == 2 and w.editor.row["sku"] == "b-S01-06"      # finished book hidden, first to fix shown
+    assert len(w.book_items()) == 2 and w.editor.row["sku"] == "b-S01-06"   # finished book hidden, first to fix shown
+    top = w.list.topLevelItem(0)                                           # the books are grouped under their set
+    assert w.list.topLevelItemCount() == 1 and top.text(0).startswith("▾  Set S01  ·  batch b") and top.isExpanded()
+    assert w.book_items()[0].text(0).startswith("#6  ") and "S01" not in w.book_items()[0].text(0)
     ed = w.editor
     ed.fields["isbn13"].setText("978-986-137-195-5")
     ed.fields["title"].setText("被討厭的勇氣")
@@ -80,7 +83,7 @@ def test_fix_a_book_and_save(gui, cfg):
     assert rows["b-S01-06"]["isbn13"] == "9789861371955" and rows["b-S01-06"]["status"] == "validated"
     assert rows["b-S01-06"]["created_at"] == "keep-me" and rows["b-S01-05"]["title"] == "Done"
     assert rows["b-S01-06"]["price"] == "6" and rows["b-S01-06"]["currency"] == "TWD"
-    assert "checked" in w.list.currentItem().text()          # saving = checked by you
+    assert "checked" in w.list.currentItem().text(0)          # saving = checked by you
 
 
 def test_lookup_fills_only_empty_fields(gui, cfg, monkeypatch):
@@ -121,7 +124,7 @@ def test_condition_and_price_are_required(gui, cfg):
     assert ed.save()
     row = {r["sku"]: r for r in store.read_rows(cfg.csv_path)}["b-S01-06"]
     assert row["status"] == "enriched" and "condition" in row["errors"] and "price" in row["errors"]
-    assert w.list.count() == 2                                       # still listed: price + condition to fill
+    assert len(w.book_items()) == 2                                  # still listed: price + condition to fill
     ed.condition.setCurrentIndex(ed.condition.findData("like_new"))
     ed.fields["price"].setText("120")
     ed.fields["currency"].setText("TWD")
@@ -137,7 +140,8 @@ def test_new_books_from_the_bot_appear(gui, cfg):
                                       "status": "needs_manual"}])
     w._csv_mtime = -1
     w._check_file()
-    assert w.list.count() == 3
+    assert len(w.book_items()) == 3 and w.list.topLevelItemCount() == 2     # a new set from the bot
+    assert w.list.topLevelItem(1).text(0).startswith("▾  Set S01  ·  batch c")
 
 
 def test_unsaved_edits_are_not_lost_when_switching(gui, cfg):
@@ -145,11 +149,11 @@ def test_unsaved_edits_are_not_lost_when_switching(gui, cfg):
     gui.settle()
     w.editor.fields["notes"].setPlainText("remember the coffee stain")
     w.editor._changed()
-    w.list.setCurrentRow(1)              # the dialog answers 'Save'
+    w.list.setCurrentItem(w.book_items()[1])      # the dialog answers 'Save'
     gui.settle()
     assert {r["sku"]: r for r in store.read_rows(cfg.csv_path)}["b-S01-06"]["notes"] == "remember the coffee stain"
     assert w.editor.row["sku"] == "b-S01-07"
-    assert "5 to fix" in w.list.item(0).text()   # book 6's entry updated after the save (ISBN, title, author)
+    assert "5 to fix" in w.book_items()[0].text(0)   # book 6's entry updated after the save (ISBN, title, author)
 
 
 def test_market_price_and_ratio_button(gui, cfg, monkeypatch):
@@ -207,28 +211,50 @@ def test_to_check_books_show_and_save_confirms(gui, cfg):
     store.write_rows(cfg.csv_path, rows)
     w = gui.ReviewWindow(cfg)
     gui.settle()
-    texts = [w.list.item(i).text() for i in range(w.list.count())]
-    assert any("S01 #5" in t and "quick check" in t for t in texts)
+    texts = [it.text(0) for it in w.book_items()]
+    assert any(t.startswith("#5") and "quick check" in t for t in texts)
     assert "to check" in w.count.text() and "to fix" in w.count.text()
-    i = next(i for i, t in enumerate(texts) if "S01 #5" in t)
-    w.list.setCurrentRow(i)
+    i = next(i for i, t in enumerate(texts) if t.startswith("#5"))
+    w.list.setCurrentItem(w.book_items()[i])
     gui.settle()
     assert w.editor.row["sku"] == "b-S01-05"
     assert w.editor.save()                                # nothing changed - 'Save / looks right'
     assert {r["sku"]: r for r in store.read_rows(cfg.csv_path)}["b-S01-05"]["status"] == "validated"
-    assert "checked" in w.list.item(i).text()
+    assert "checked" in w.book_items()[i].text(0)
 
 
 def test_sets_window(gui, cfg):
     from pipeline.apps.sets import refresh_sets
     w = gui.SetsWindow(cfg)
     gui.settle()
-    assert w.list.count() == 1 and w.current["set_code"] == "b-S01" and w.current["status"] == "draft"
+    assert w.list.topLevelItemCount() == 1 and w.current["set_code"] == "b-S01" and w.current["status"] == "draft"
     assert "not checked yet" in w.state.text()
+    assert w.discount.text() == "20" and "% off" in w.list.topLevelItem(0).text(0)
+    w.discount.setText("25")
+    w.discount.textEdited.emit("25")
+    assert "no TWD price" in w.original.text()              # book 5 is priced in NZD, book 6 has no price yet
+    w.current = {**w.current, "original_price": "1000", "status": "ready"}
+    w._recount_price()
+    assert w.zhe.text() == "= 75 折" and w.price.text() == "750" and "1,000" in w.original.text()
+    w.price.setText("800")                                  # typing the set price changes the discount ...
+    w.price.textEdited.emit("800")
+    assert w.discount.text() == "20" and w.zhe.text() == "= 8 折"
+    w.price.setText("827")
+    w.price.textEdited.emit("827")
+    assert w.discount.text() == "17.3" and w.zhe.text() == ""
+    w.discount.setText("25")                                # ... and the discount changes the price
+    w.discount.textEdited.emit("25")
+    assert w.price.text() == "750" and w._fields()["discount"] == "25" and "set_price" not in w._fields()
     w.title.setText("【b-S01】三本書")
     assert w.save() is True
     s = refresh_sets(cfg)[0]
-    assert s["set_title"] == "【b-S01】三本書" and s["custom"] == "set_title"
+    assert s["set_title"] == "【b-S01】三本書" and s["custom"] == "discount,set_title" and s["discount"] == "25"
+    w.price.setText("1,234")
+    w.price.textEdited.emit("1,234")
+    assert w._fields()["set_price"] == "1,234" and "discount" not in w._fields()
+    assert w.save() is True
+    s = refresh_sets(cfg)[0]
+    assert s["custom"] == "set_price,set_title" and s["set_price"] == "1234"
     w.status_box.setCurrentIndex(w.status_box.findData("withdrawn"))
     w.change_status()
     assert refresh_sets(cfg)[0]["status"] == "withdrawn" and w.current["status"] == "withdrawn"
@@ -240,3 +266,50 @@ def test_sets_window(gui, cfg):
     w.make_upload()
     gui.settle()
     assert shown and "No set is ready" in shown[0]
+
+
+def test_sets_fold_and_refresh(gui, cfg):
+    w = gui.ReviewWindow(cfg)
+    gui.settle()
+    top = w.list.topLevelItem(0)
+    w._clicked(top)                                        # clicking a set heading folds it ...
+    assert not top.isExpanded()
+    w._folded(top)
+    assert top.text(0).startswith("▸  Set S01")                       # its arrow shows it is folded
+    w.list.itemCollapsed.emit(top)
+    w.reload()                                             # ... and it stays folded after a refresh (Ctrl+R)
+    assert not w.list.topLevelItem(0).isExpanded()
+    assert "Ctrl+R" in w.refresh_btn.text() and "Sell sets" in w.sets_btn.text()
+
+
+def test_genres_are_chips(gui, cfg):
+    w = gui.ReviewWindow(cfg)
+    gui.settle()
+    ed = w.editor
+    g = ed.fields["genre"]
+    g.setText("童書 > 冒險／驚悚小說")
+    assert g.genres() == ["童書", "冒險／驚悚小說"] and len(g._chips) == 2
+    g.add("繪本")
+    assert g.text() == "童書 > 冒險／驚悚小說 > 繪本" and ed.dirty          # adding a genre is an edit
+    g._chips[0].remove_button.click()                                    # x on the first chip
+    assert g.genres() == ["冒險／驚悚小說", "繪本"]
+    g._start_add()
+    g.input.setText("Body, Mind & Spirit")                               # commas stay inside one genre
+    g._finish_add()
+    assert g.genres()[-1] == "Body, Mind & Spirit"
+    for name, value in (("isbn13", "978-986-137-195-5"), ("title", "T"), ("author", "A")):
+        ed.fields[name].setText(value)
+    assert ed.save()
+    row = {r["sku"]: r for r in store.read_rows(cfg.csv_path)}["b-S01-06"]
+    assert row["genre"] == "冒險／驚悚小說 > 繪本 > Body, Mind & Spirit"
+
+
+def test_whole_set_photo_is_numbered(cfg):
+    from PIL import Image
+    import io
+    r = editing.list_rows(cfg)[0]
+    whole = next(p for p in r["photos"] if p["label"] == "Whole set")
+    assert whole["numbered"] and whole["mark"] == int(r["position"])
+    plain = Image.open(io.BytesIO(editing.thumbnail_bytes(cfg, whole["path"], 400)))
+    marked = Image.open(io.BytesIO(editing.thumbnail_bytes(cfg, whole["path"], 400, 0, True, whole["mark"])))
+    assert plain.size == marked.size and plain.tobytes() != marked.tobytes()   # numbers drawn on it

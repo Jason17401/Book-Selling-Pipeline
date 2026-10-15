@@ -36,8 +36,8 @@ def main() -> None:
     p.add_argument("photo")
     p.add_argument("--save", default="segments.jpg", help="where to write the picture with the boxes")
     p.add_argument("--covers", help="also write each book's cover picture into this folder")
-    p = sub.add_parser("covers", help="cut each book's own cover out of the set photo for books processed before this "
-                                      "existed")
+    p = sub.add_parser("covers", help="cut each book's own cover out of the set photo (and make its front+back "
+                                      "picture) for books processed before this existed")
     p.add_argument("--redo", action="store_true", help="also cut again the covers already cut (e.g. after an update "
                                                        "that cuts them better); listed/sold books are left alone")
     sub.add_parser("genres", help="look up the genre of books saved before genres existed (or still without one)")
@@ -63,7 +63,7 @@ def main() -> None:
     p.add_argument("--no-numbers", action="store_true", help="don't draw numbers on the front photo (physical labels)")
     p.add_argument("--set-price", type=float, help="one price for the whole set (default: each book's own price)")
     p.add_argument("--set-currency", help="currency of --set-price (default DEFAULT_CURRENCY)")
-    p.add_argument("--with-barcodes", action="store_true", help="also include each book's barcode photo, number stamped on")
+    p.add_argument("--with-barcodes", action="store_true", help="also include each book's back photo, number stamped on")
     p.add_argument("--no-covers", action="store_true", help="leave out each book's own cover picture")
     p.add_argument("--force", action="store_true")
     p = sub.add_parser("shopee", help="sell the sets on Shopee (or double-click shopee.bat): first read Shopee's "
@@ -199,14 +199,28 @@ def main() -> None:
         from pathlib import Path as _P
         from .photos.decode import load_image
         from .photos.segment import cut_book, find_books, save_segments
+        from .photos.setlayout import save_front_and_back
         work = store.read_rows(cfg.csv_path)
         made = {}
         sets = {}
+        pairs = 0
         for r in work:
             whole = r.get("set_photo") or r.get("front_photo")
             own = r.get("front_photo") and r["front_photo"] != whole
             cut_before = own and _P(r["front_photo"]).name == "cover.jpg"     # cut by the pipeline, not your own photo
-            if r.get("status") in ("listed", "sold") or not whole or (own and not (a.redo and cut_before)):
+            if r.get("status") in ("listed", "sold") or not whole:
+                continue
+            if own and not (a.redo and cut_before):
+                if not r.get("front_back_photo") and r.get("back_photo"):    # cut before front+back pictures existed
+                    try:
+                        pair = save_front_and_back(_P(r["front_photo"]).with_name("front_back.jpg"),
+                                                   load_image(r["front_photo"]), None, int(r.get("position") or 0),
+                                                   r["back_photo"], cfg)
+                    except Exception:
+                        pair = None
+                    if pair:
+                        made[r["sku"]] = (r["front_photo"], whole, str(pair))
+                        pairs += 1
                 continue
             sets.setdefault(whole, []).append(r)
         for whole, rows_ in sets.items():
@@ -223,16 +237,19 @@ def main() -> None:
                     continue
                 dst = _P(whole).parent / f"{pos:02d}" / "cover.jpg"
                 dst.parent.mkdir(parents=True, exist_ok=True)
-                cut_book(img, segs[pos - 1], cfg.segment_margin, segs).save(dst, quality=95)
-                made[r["sku"]] = (str(dst), whole)
+                cover = cut_book(img, segs[pos - 1], cfg.segment_margin, segs)
+                cover.save(dst, quality=95)
+                pair = save_front_and_back(dst.with_name("front_back.jpg"), cover, img, pos, r.get("back_photo"), cfg) \
+                    if r.get("back_photo") else None
+                made[r["sku"]] = (str(dst), whole, str(pair or ""))
             print(f"  {whole}: {sum(1 for r in rows_ if r['sku'] in made)} cover(s)")
 
         def apply(rows):
             for r in rows:
                 if r["sku"] in made:
-                    r["front_photo"], r["set_photo"] = made[r["sku"]]
+                    r["front_photo"], r["set_photo"], r["front_back_photo"] = made[r["sku"]]
         store.update_rows(cfg.csv_path, apply)
-        print(f"{len(made)} book cover(s) cut out")
+        print(f"{len(made) - pairs} book cover(s) cut out" + (f", {pairs} front+back picture(s) made" if pairs else ""))
     elif a.cmd == "genres":
         from .sources.lookup import lookup_book
         work = store.read_rows(cfg.csv_path)

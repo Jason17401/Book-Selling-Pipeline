@@ -124,6 +124,26 @@ def stamp_number(src, dst, n: int) -> None:
     img.save(dst, quality=92)
 
 
+def draw_pair(canvas: Image.Image, y: int, row_h: int, front: Optional[Image.Image], back: Optional[Image.Image],
+              n: int) -> None:
+    """One book on a row of `canvas`: its front (left) and back (right), scaled to the same size, with its number."""
+    size = canvas.width
+    for k, im in enumerate((front, back)):
+        if im is None:
+            continue
+        im = ImageOps.contain(im.convert("RGB"), (size // 2 - 30, row_h - 30))
+        canvas.paste(im, (k * size // 2 + (size // 2 - im.width) // 2, y + (row_h - im.height) // 2))
+    _badge(ImageDraw.Draw(canvas), 20, y + 20, n, max(22, min(size // 14, row_h // 6)))
+
+
+def front_and_back(front: Optional[Image.Image], back: Optional[Image.Image], n: int, size: int = 1500) -> Image.Image:
+    """The book's front and back side by side in one square picture, numbered - made with the cover cut-outs, shown in
+    the review window, and used as the book's photo in a set listing."""
+    canvas = Image.new("RGB", (size, size), "white")
+    draw_pair(canvas, 0, size, front, back, n)
+    return canvas
+
+
 def make_orient_sheet(img: Image.Image, dst, thumb: int = 420) -> None:
     """Four copies of the photo turned 0/90/180/270 degrees clockwise. Pick the upright one."""
     f = font(34)
@@ -153,7 +173,7 @@ def book_cover(row: dict, front: Optional[Image.Image], grid, region) -> Optiona
 def make_review_sheet(front: Optional[Image.Image], rows: list, grid, region, dst: Path, thumb_h: int = 160,
                       segs=None) -> None:
     """One picture to eyeball a set: the numbered front photo on top, then per book:
-    that book's cover | its barcode photo | number, ISBN, title, author.
+    that book's cover | its back photo | number, ISBN, title, author.
     If the two pictures on a row are not the same book, the photos were sent in the wrong order."""
     W = 1000
     top = None
@@ -174,7 +194,7 @@ def make_review_sheet(front: Optional[Image.Image], rows: list, grid, region, ds
         pos = int(r["position"])
         pics = [book_cover(r, front, grid, region)]
         try:
-            pics.append(load_image(r["barcode_photo"]))
+            pics.append(load_image(r["back_photo"]))
         except Exception:
             pics.append(None)
         for im in pics:

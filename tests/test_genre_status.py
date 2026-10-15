@@ -63,7 +63,7 @@ def test_complete_books_wait_for_a_quick_check(tmp_path):
     photo.write_bytes(b"x")
     cfg = Config(data_dir=tmp_path)
     r = {"isbn13": "9789861371955", "title": "T", "author": "A", "condition": "like_new", "price": "120",
-         "currency": "TWD", "barcode_photo": str(photo), "front_photo": str(photo)}
+         "currency": "TWD", "back_photo": str(photo), "front_photo": str(photo)}
     assert refresh_status(r, cfg) == [] and r["status"] == "to_check"         # processed: complete, not yet checked
     refresh_status(r, cfg)
     assert r["status"] == "to_check"                                          # re-validating doesn't confirm it

@@ -19,9 +19,9 @@ def cfg(tmp_path):
     rows = [
         {"sku": "b-S01-05", "batch": "b", "set_id": "S01", "position": "5", "isbn13": TW_ISBNS[4], "title": "Done",
          "author": "A", "condition": "like_new", "price": "5", "currency": "NZD", "front_photo": str(front),
-         "barcode_photo": str(barcode), "status": "validated"},
+         "back_photo": str(barcode), "status": "validated"},
         {"sku": "b-S01-06", "batch": "b", "set_id": "S01", "position": "6", "front_photo": str(front),
-         "barcode_photo": str(barcode), "status": "needs_manual", "created_at": "keep-me"},
+         "back_photo": str(barcode), "status": "needs_manual", "created_at": "keep-me"},
     ]
     store.write_rows(c.csv_path, rows)
     return c
@@ -33,7 +33,7 @@ def test_only_books_needing_attention_are_listed(cfg):
     msgs = " ".join(i["msg"] for i in rows[0]["issues"])
     assert "ISBN missing" in msgs and "Title missing" in msgs
     assert "Price missing" in msgs and "Condition missing" in msgs        # both required
-    assert [p["label"] for p in rows[0]["photos"]] == ["This book (front)", "Barcode photo", "Whole set"]
+    assert [p["label"] for p in rows[0]["photos"]] == ["This book (front)", "Back photo", "Whole set"]
     assert len(editing.list_rows(cfg, only_attention=False)) == 2
 
 
@@ -86,7 +86,7 @@ def test_old_csv_is_upgraded(cfg):
         w.writeheader()
         w.writerow({"sku": "old", "price_nzd": "5", "description": "blurb", "back_crop": "x.jpg", "status": "enriched"})
     r = store.read_rows(cfg.csv_path)[0]
-    assert r["price"] == "5" and r["currency"] == "NZD" and r["barcode_photo"] == "x.jpg"
+    assert r["price"] == "5" and r["currency"] == "NZD" and r["back_photo"] == "x.jpg"
     store.write_rows(cfg.csv_path, [r])
     assert "description" not in open(cfg.csv_path, encoding="utf-8-sig").readline()
 

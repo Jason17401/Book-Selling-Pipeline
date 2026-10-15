@@ -44,7 +44,7 @@ STATUSES = ("needs_manual", "enriched", "to_check", "validated", "listed", "sold
 
 
 def photos_of(row: dict) -> list:
-    return list(dict.fromkeys(p for p in (row.get("front_photo"), row.get("set_photo"), row.get("barcode_photo")) if p))
+    return list(dict.fromkeys(p for p in (row.get("front_photo"), row.get("set_photo"), row.get("back_photo")) if p))
 
 
 def row_issues(r: dict, cfg: Config) -> list:
@@ -87,8 +87,8 @@ def row_issues(r: dict, cfg: Config) -> list:
             out.append({"field": "market_price", "msg": "Market price must be a number, e.g. 300"})
         if not re.fullmatch(r"[A-Z]{3}", (r.get("market_currency") or "").strip()):
             out.append({"field": "market_currency", "msg": "Market price currency must be a 3-letter code like TWD"})
-    if not r.get("barcode_photo"):
-        out.append({"field": "", "msg": "No barcode photo recorded for this book"})
+    if not r.get("back_photo"):
+        out.append({"field": "", "msg": "No back photo recorded for this book"})
     missing = [Path(p).name for p in photos_of(r) if not Path(p).exists()]
     if missing:
         out.append({"field": "", "msg": f"Photo file missing: {', '.join(missing)}"})

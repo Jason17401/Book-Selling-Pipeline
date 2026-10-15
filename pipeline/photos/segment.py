@@ -11,7 +11,7 @@ How (OpenCV, no AI model needed):
   4. The box is cut from the FULL-resolution photo with a margin around the book (SEGMENT_MARGIN, e.g. 0.04 = 4% of the
      book's size on every side).
 Book N is still the N-th book counting along the top row left to right, then the next row - the order you send the
-barcode photos in. If a cell shows nothing book-like, the plain grid cell is used for it (found=False).
+back photos in. If a cell shows nothing book-like, the plain grid cell is used for it (found=False).
 """
 from __future__ import annotations
 

@@ -6,7 +6,7 @@ Engines (set DECODERS in .env, tried in that order, first ISBN wins):
   opencv  - OpenCV's barcode module (pip install opencv-python-headless). Weakest, but another opinion.
 Engines that are not installed are skipped silently.
 
-For a photo of ONE book (a barcode photo) `decode_isbn_image` tries the picture several ways
+For a photo of ONE book (a back photo) `decode_isbn_image` tries the picture several ways
 (sizes, contrast, sharpening, small tilts, tiles) until something reads. DECODE_EFFORT=fast|normal|max sets how hard it tries.
 
 Taiwanese books usually carry two EAN-13 barcodes: the ISBN (978/979...) and a price/product code (often 471...).
@@ -328,7 +328,7 @@ def _find(img: Image.Image, effort: str):
 
 
 def decode_isbn_image(img: Image.Image, effort: Optional[str] = None, addon: bool = True) -> Optional[str]:
-    """The ISBN in a barcode photo (None if unreadable). With addon=True it then also tries hard to read the small
+    """The ISBN in a back photo (None if unreadable). With addon=True it then also tries hard to read the small
     5-digit PRICE barcode next to it (stored in ADDONS[isbn]) - that price is the first choice for the market price."""
     effort = effort or _SETTINGS["effort"]
     det, variant = _find(img, effort)

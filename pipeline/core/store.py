@@ -13,14 +13,14 @@ COLUMNS = [
     "sku", "batch", "set_id", "position", "isbn13", "title", "author", "publisher", "year", "pages", "genre",
     "condition", "price", "currency", "price_basis",
     "market_price", "market_currency", "market_source", "market_url", "market_match", "market_isbn", "front_photo", "set_photo",
-    "barcode_photo", "status", "errors", "book_source", "created_at", "notes",
+    "back_photo", "front_back_photo", "status", "errors", "book_source", "created_at", "notes",
 ]
 # status: needs_manual -> enriched -> to_check -> validated -> listed -> sold   (meanings: pipeline/core/validate.py)
 # A book belongs to the set batch + set_id; that set's code is "<batch>-<set_id>" - the start of the book's sku.
 
 # data/sets.csv - one row per set, the same whatever platform it is sold on (pipeline/apps/sets.py)
 SET_COLUMNS = [
-    "set_code", "book_count", "set_title", "set_price", "currency", "weight_g", "length_cm", "width_cm", "height_cm",
+    "set_code", "book_count", "set_title", "original_price", "discount", "set_price", "currency", "weight_g",
     "description", "images", "status", "errors", "sold_on", "sold_at", "sold_price", "custom", "created_at",
     "updated_at", "notes",
 ]
@@ -114,8 +114,8 @@ def _upgrade(r: dict) -> dict:
     """Rows written by older versions: price_nzd -> price + currency NZD. Dropped columns vanish on the next save."""
     if r.get("price_nzd") and not r.get("price"):
         r["price"], r["currency"] = r["price_nzd"], r.get("currency") or "NZD"
-    if not r.get("barcode_photo") and r.get("back_crop"):
-        r["barcode_photo"] = r["back_crop"]
+    if not r.get("back_photo"):                        # renamed: barcode_photo (and back_crop before it)
+        r["back_photo"] = r.pop("barcode_photo", "") or r.get("back_crop", "") or ""
     if not r.get("set_photo") and r.get("front_photo"):   # older rows: front_photo WAS the whole-set photo
         r["set_photo"] = r["front_photo"]
     if r.get("condition") == "acceptable":       # renamed to the Taiwanese grade 普通 = fair

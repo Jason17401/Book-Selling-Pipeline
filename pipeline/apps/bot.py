@@ -53,15 +53,15 @@ async def fetch_with_retries(getter, dest, timeout: float, attempts: int = DOWNL
     return attempts
 
 HELP = (
-    "For each set of {n}: send ONE photo of all the front covers, then the BARCODE photo (back cover) of each book, "
+    "For each set of {n}: send ONE photo of all the front covers, then the BACK photo (back cover) of each book, "
     "one photo per book: top row left to right, then the next row left to right.\n"
     "I reply with where you are (e.g. 'Set 1: barcode 4/{n}'). If a number is skipped, a photo did not arrive.\n\n"
-    "ORDER: send the front photo ON ITS OWN first and wait for my reply, then the {n} barcode photos as ONE selection, "
+    "ORDER: send the front photo ON ITS OWN first and wait for my reply, then the {n} back photos as ONE selection, "
     "ticked in book order (Telegram keeps the order inside one album of up to 10). Never select more than 10 at once.\n\n"
-    "Normal Photos are fine for barcode photos. Each book's cover picture is cut out of the FRONT photo, so for sharp "
+    "Normal Photos are fine for back photos. Each book's cover picture is cut out of the FRONT photo, so for sharp "
     "covers send the front photo as a File (Telegram shrinks normal photos). Files over 20 MB cannot be received by "
     "bots.\n"
-    "Captions (all optional): 'retake' = replaces the previous barcode photo; 'front' = starts a new set early (short "
+    "Captions (all optional): 'retake' = replaces the previous back photo; 'front' = starts a new set early (short "
     "set); '良好 150' (or 'good 150') on the front photo = condition/price for the whole set (grades: 全新 近全新 "
     "良好 普通 差強人意).\n\n"
     "/undo - remove the last photo\n/status - where am I\n/process - ingest everything sent so far\n"
@@ -255,7 +255,7 @@ def build_app(cfg: Config) -> Application:
         text = format_summary(summary) + "\n\n" + todo_text(cfg, limit=15)
         for i in range(0, len(text), 3900):  # Telegram's message limit is 4096 characters
             await send_with_retries(lambda chunk=text[i:i + 3900]: msg.reply_text(chunk))
-        caption = "Check: on each row, the book from the front photo and its barcode photo must match"
+        caption = "Check: on each row, the book from the front photo and its back photo must match"
         for sheet in summary.review_sheets:
             def send(path=sheet):
                 with open(path, "rb") as f:   # re-open on every try: a failed upload has read the file

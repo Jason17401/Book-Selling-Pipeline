@@ -1,5 +1,7 @@
-"""Sets: 1 front photo + SET_SIZE barcode photos per set."""
+"""Sets: 1 front photo + SET_SIZE back photos per set."""
 from pathlib import Path
+
+from PIL import Image
 
 from pipeline.core import store
 from pipeline.core.config import Config
@@ -70,7 +72,7 @@ def test_retakes(tmp_path):
     truth = {extra.name: TW_ISBNS[1], dup.name: TW_ISBNS[2]}
     sets = split_by_count(order, 3, lambda p: truth.get(p.name) or dec(p))
     assert len(sets) == 1 and [b.isbn for b in sets[0].books] == TW_ISBNS[:3]
-    assert sets[0].books[1].barcode_photo == extra and len(sets[0].books[2].photos) == 2
+    assert sets[0].books[1].back_photo == extra and len(sets[0].books[2].photos) == 2
 
 
 def test_front_caption_starts_short_set(tmp_path):
@@ -93,7 +95,7 @@ def test_process_sets_end_to_end(tmp_path):
     cfg.ensure_dirs()
     set_front().save(cfg.inbox / "0001.jpg", quality=92)
     (cfg.inbox / "0001.txt").write_text("good 150 TWD", encoding="utf-8")
-    (cfg.inbox / "0003.txt").write_text("poor 3", encoding="utf-8")         # caption on book 2's barcode photo
+    (cfg.inbox / "0003.txt").write_text("poor 3", encoding="utf-8")         # caption on book 2's back photo
     for i in range(10):
         img = book_back(TW_ISBNS[i], size=(900, 1200), module=3.0, seed=i)
         if i == 5:  # one unreadable back: blank photo
@@ -113,12 +115,13 @@ def test_process_sets_end_to_end(tmp_path):
     assert rows[0]["status"] == "to_check"                   # complete: waits for your quick check
     assert rows[0]["condition"] == "good" and rows[0]["price"] == "150" and rows[0]["currency"] == "TWD"
     assert rows[1]["condition"] == "poor" and rows[1]["price"] == "3" and rows[1]["currency"] == "TWD"
-    assert set(store.COLUMNS) >= {"front_photo", "barcode_photo", "price", "currency"}
-    assert not {"description", "front_crop", "back_crop", "back_photo", "photo_paths"} & set(store.COLUMNS)
+    assert set(store.COLUMNS) >= {"front_photo", "back_photo", "price", "currency"}
+    assert not {"description", "front_crop", "back_crop", "barcode_photo", "photo_paths"} & set(store.COLUMNS)
+    assert all(Image.open(r["front_back_photo"]).size == (1500, 1500) for r in rows)   # front + back, square
     set_dir = cfg.processed / s.batch / "S01"
     assert (set_dir / "front.jpg").exists() and (set_dir / "review.jpg").exists()
     assert sorted(p.name for p in set_dir.iterdir() if p.is_dir()) == [f"{i:02d}" for i in range(1, 11)]
-    assert Path(rows[0]["set_photo"]) == set_dir / "front.jpg" and Path(rows[0]["barcode_photo"]).parent.name == "01"
+    assert Path(rows[0]["set_photo"]) == set_dir / "front.jpg" and Path(rows[0]["back_photo"]).parent.name == "01"
     assert Path(rows[0]["front_photo"]) == set_dir / "01" / "cover.jpg" and Path(rows[0]["front_photo"]).exists()
     assert (set_dir / "segments.json").exists()
     assert not list(cfg.inbox.iterdir())                      # nothing left behind

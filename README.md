@@ -39,7 +39,7 @@ Open PowerShell in the `Book Selling Pipeline` folder (in File Explorer: open th
 
 ```powershell
 python -m venv .venv
-.\.venv\Scripts\activate.ps1
+.\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 ```
@@ -110,7 +110,7 @@ paste them anywhere else.
    barcode sharp and without glare. A normal photo is plenty.
 
 Send them as described in section 4, then look at the **review sheet** the bot sends back: on each row, the book's
-cover (cut out of the front photo) and its barcode photo must be the same book.
+cover (cut out of the front photo) and its back photo must be the same book.
 
 **How the covers are cut out.** The pipeline finds each book on the front photo (where it differs from the table, and
 the straight edges between books), straightens slightly turned books, and saves each one at full resolution with a
@@ -118,7 +118,7 @@ small margin of table around it (`SEGMENT_MARGIN`, default 4% of the book's size
 table (darker table, same colour, carpet texture still showing through) is not counted as book, so the cover sits in
 the middle of its picture with the same margin on every side, and the margin never reaches past halfway to the next
 book. The numbering stays the grid order,
-so book N's cover always pairs with barcode photo N. To see how a photo is cut:
+so book N's cover always pairs with back photo N. To see how a photo is cut:
 
 ```powershell
 python -m pipeline segment path\to\front.jpg --covers covers_test
@@ -151,19 +151,19 @@ Double-click **`bot.bat`** and leave its window open while you work. It shows ea
 ### 4.2 Send a set (in Telegram)
 
 1. Send the **front photo** on its own and wait for the reply `Set 1: FRONT photo saved`.
-2. Select the **10 barcode photos in book order** and send them in **one go** (one album). Never select more than 10
+2. Select the **10 back photos in book order** and send them in **one go** (one album). Never select more than 10
    at once - Telegram splits bigger selections into albums that can arrive out of order.
 3. The bot answers once the album has arrived: `Set 1: barcode 10/10 saved. Set complete`.
-4. Next set: front photo again, then its 10 barcode photos. Send as many sets as you like before processing.
+4. Next set: front photo again, then its 10 back photos. Send as many sets as you like before processing.
 
 **Captions** (optional, typed with a photo):
 
-| Caption                                                                                          | On the front photo                                    | On a barcode photo                                                    |
-| ------------------------------------------------------------------------------------------------ | ----------------------------------------------------- | --------------------------------------------------------------------- |
-| a condition: `全新` `近全新` `良好` `普通` `差強人意` (or `new` `like new` `good` `fair` `poor`) | condition of every book in the set                    | condition of that book                                                |
-| condition + price: `良好 150`, `good 150 TWD`                                                    | condition + price for every book                      | condition + price for that book                                       |
-| `retake`                                                                                         | -                                                     | replaces the previous barcode photo (send it right after the bad one) |
-| `front`                                                                                          | starts a new set early (a set of fewer than 10 books) | -                                                                     |
+| Caption                                                                                          | On the front photo                                    | On a back photo                                                    |
+| ------------------------------------------------------------------------------------------------ | ----------------------------------------------------- | ------------------------------------------------------------------ |
+| a condition: `全新` `近全新` `良好` `普通` `差強人意` (or `new` `like new` `good` `fair` `poor`) | condition of every book in the set                    | condition of that book                                             |
+| condition + price: `良好 150`, `good 150 TWD`                                                    | condition + price for every book                      | condition + price for that book                                    |
+| `retake`                                                                                         | -                                                     | replaces the previous back photo (send it right after the bad one) |
+| `front`                                                                                          | starts a new set early (a set of fewer than 10 books) | -                                                                  |
 
 Without a caption, books are 近全新 (`like_new`) and priced from the market price. The grades are explained in
 [section 6.1](#61-condition-grades).
@@ -176,14 +176,25 @@ the list of books that still need something.
 
 ### 4.4 Review and fix (on the computer)
 
-Double-click **`review.bat`** (the bot can keep running). Every newly processed book is listed:
+Double-click **`review.bat`** (the bot can keep running). On the left, the books that need you, **grouped by set**:
+each set is a heading - `Set S01 · batch 20261008-153012` (set + batch together identify it) with how many books still
+need something - and its books below it as `#3 Title`. Click a set heading to fold it away or open it again.
+
+On the right, the chosen book: four photos - **its front** (cut out of the set photo), **its back photo**, **front +
+back** side by side (the picture its set listing uses) and **the whole set** with every book's number on it and this
+book outlined in blue. Click one to see it big: it opens fitted
+to the window, so every photo shows the same way; **+ Bigger / − Smaller** (or `+` / `-`, a left / right click on the
+photo, `Ctrl`+mouse wheel) zoom in and out, **Fit to window** (`0`) shows it whole again, **Actual size** (`1`).
+**Genres** are chips: × removes one, **+ Add genre** adds one (type it, Enter).
+
+What each colour means:
 
 - **Red - to fix:** something is missing or wrong (e.g. no ISBN, no price). The fields to fix are outlined in red.
 - **Amber - quick check:** everything was found. Glance at the photos and fields; if they look right just press
   **Save / looks right** (or `Ctrl+Enter` to save and go to the next one) - nothing needs typing.
 - **Green - checked:** you have saved it. A set goes on sale when all its books are green.
 
-- **Barcode not read:** read the 13 digits under the barcode in the photo (click it to enlarge), type them, press
+- **Barcode not read:** read the 13 digits under the barcode on the back photo (click it to see it big), type them, press
   **Look up**, check, **Save**.
 - **Price missing:** no market price was found. Type your price (and currency), or find the book online - **Search the
   web** opens a Google search; paste the shop's product link into **Shop link** and press **Use link**.
@@ -191,8 +202,8 @@ Double-click **`review.bat`** (the bot can keep running). Every newly processed 
   title and author, different ISBN/year) - check it looks right.
 - **Whole set** fills an empty condition or price for every book of the set at once.
 
-`Ctrl+S` saves, `Ctrl+Enter` saves and jumps to the next red or amber book. Tick **Show checked books too** to see
-the green ones again.
+`Ctrl+S` saves, `Ctrl+Enter` saves and jumps to the next red or amber book (into the next set too), `Ctrl+R` refreshes,
+`Ctrl+L` opens **Sell sets** (4.5). Tick **Show checked books too** to see the green ones again.
 
 ### 4.5 Sell the sets on Shopee
 
@@ -209,13 +220,17 @@ file, the photos, and - from Shopee's order report - which sets are ordered and 
 
 1. **Shopee's template.** Seller Center → 我的商品 → 新增商品 → **大量上傳** → download the **基礎模板** (basic
    template). If it is an `.xls` file, open it in Excel and **Save As → Excel Workbook (.xlsx)**. Save it as
-   `data\listings\shopee\template.xlsx`.
-2. **Category.** Leave `SHOPEE_CATEGORY_ID` empty: the pipeline looks in the template's category list for the
-   category containing `二手書`. If it finds none or several, `shopee.bat` lists them - copy the right 分類代碼 into
-   `SHOPEE_CATEGORY_ID` in `.env`.
-3. **Delivery, weight, size** in `.env`: `SHOPEE_LOGISTICS` (the delivery options to switch on, e.g. 7-ELEVEN, 全家,
-   蝦皮店到店), `SET_WEIGHT_PER_BOOK_G` and `SET_BOX_CM` (used unless you type a set's real weight/size), and
-   `SET_DISCOUNT` if a set should cost less than its books together.
+   `data\listings\shopee\template.xlsx`. Its upload sheet is 上傳模板: rows 1-6 are Shopee's keys, names,
+   必填/選填 (required/optional), explanations and formats; the sets go from row 7. Shopee lists only the delivery
+   options switched on in your shop, so download it again after changing them.
+2. **Category - optional, nothing to set.** The template marks 分類代碼 as 選填 (optional). The sets go in **101573
+   其他書籍** (Books & Magazines > Books > Other Books) when the template's category list has it; otherwise the column is
+   left blank and Shopee suggests a category for each set under 尚未刊登 - check it there before publishing. To always
+   use one, set `SHOPEE_CATEGORY_ID` in `.env` (e.g. 101541 繪本童書 for children's books).
+3. **Delivery** in `.env`: `SHOPEE_LOGISTICS` (the delivery options to switch on, e.g. 7-ELEVEN, 全家, 蝦皮店到店), and
+   `SET_DISCOUNT`, the whole-set discount (default 20% off the sum of its books' prices = 8 折; change it per set in
+   Sell sets). Nothing to weigh or measure: Shopee needs a weight,
+   so it is estimated (`SET_WEIGHT_PER_BOOK_G` x books); the parcel size is optional and left out.
 4. _Optional:_ `data\listings\description_footer.txt` - the lines at the end of every description (made on the first
    run; edit freely).
 5. _Optional:_ photo links, so the photos are filled in automatically (4.6). Without them you drag 9 photos into
@@ -234,7 +249,7 @@ file, the photos, and - from Shopee's order report - which sets are ordered and 
 3. **You:** Seller Center → 我的商品 → 新增商品 → 大量上傳 → upload the file. The sets appear under **尚未刊登**
    (not yet published). For each: add the photos `01.jpg` to `09.jpg` in order (unless they have links), glance at
    it, and **publish** (刊登).
-4. _Optional:_ paste the product's Shopee link into the review window → **Sets & Shopee** → **Save link** (or
+4. _Optional:_ paste the product's Shopee link into the review window → **Sell sets** → **Save link** (or
    `python -m pipeline shopee-link <set code> <link>`), so you can open it from there.
 5. **Orders.** Seller Center → 訂單 → 我的銷售 → **匯出** (export) the order report. Put the file in
    `data\listings\shopee\import` and double-click `shopee.bat` again. Ordered sets become **reserved**, completed
@@ -247,8 +262,13 @@ file, the photos, and - from Shopee's order report - which sets are ordered and 
 (`20261008-153012-S01-03` is book 3). It is the product's 主商品貨號 (parent SKU), in its title and on photo 1, so every
 Shopee file and order can be traced to its books.
 
-**The review window → Sets & Shopee** shows every set: status, title, total price, weight, parcel size and the
-description (with a character count - Shopee allows 3,000). Change any of them and **Save set**: your text is kept
+**The review window → Sell sets** (`Ctrl+L`) is where the sets are sold: one row per set - the thing that becomes one
+Shopee product - with its status, listing title (max 60 characters), its price - **original price** (the books' prices added up), **whole-set
+discount** (20% unless you change it) and the resulting **set price** (type either one - the discount or the set
+price - and the other follows: 1,000 with 25% off = 750, or type 800 and the discount becomes 20%; the one you typed
+last is what is kept) - and the description buyers read (with
+a character count - Shopee allows 3,000), its Shopee status / link / order, and **Make Shopee upload file** at the top
+(= `shopee.bat`). Change any of them and **Save set**: your text is kept
 from then on (**Back to automatic text** undoes that). There you can also change a set's status by hand - sold at a
 market, withdrawn, or ready again after you deleted it on Shopee (`python -m pipeline set-status <code> <status>`).
 
@@ -278,7 +298,7 @@ that photo (like on Shopee itself). Keep the keys in `.env` only.
 | Command             | What it does                                                                    |
 | ------------------- | ------------------------------------------------------------------------------- |
 | `/start` or `/help` | how to send photos, and your Telegram user id                                   |
-| `/status`           | where you are: which set, how many barcode photos saved                         |
+| `/status`           | where you are: which set, how many back photos saved                            |
 | `/undo`             | removes the last photo you sent                                                 |
 | `/process`          | processes every photo sent so far (`/process 20` also checks you sent 20 books) |
 | `/todo`             | which books still need fixing, and how many just need a quick check             |
@@ -302,7 +322,7 @@ over English ones, so a book Google only knows in English is looked up further. 
 
 **Market price** = the list price (定價) of a **new, printed** copy, first match wins:
 
-1. the small **price barcode** printed next to the ISBN barcode, read from your barcode photo (free, instant)
+1. the small **price barcode** printed next to the ISBN barcode, read from your back photo (free, instant)
 2. **NCL** - the price the publisher registered (finds out-of-print books)
 3. the ISBN in eslite's and books.com.tw's own search
 4. a web search for the ISBN, e.g. `9789574760190 site:eslite.com` - only with a Tavily / LangSearch key
@@ -323,21 +343,22 @@ caption is never changed automatically.
 Everything lives in **`data\books.csv`** (one row per book). Edit it with the review window rather than Excel - Excel
 turns ISBNs into `9.78E+12` and locks the file.
 
-| Column                                                    | Meaning                                                                                                                                                                                                |
-| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `sku`, `batch`, `set_id`, `position`                      | unique id; when it was processed; set (S01, S02 ...); number in the set (1-10)                                                                                                                         |
-| `isbn13`, `title`, `author`, `publisher`, `year`, `pages` | the book                                                                                                                                                                                               |
-| `genre`                                                   | e.g. `童書 > 冒險／驚悚小說` (overarching > most specific)                                                                                                                                             |
-| `condition`                                               | one of the five grades below (required)                                                                                                                                                                |
-| `price`, `currency`, `price_basis`                        | your price (required) and how it was set: `40% of 300 TWD`, `caption` or `manual`                                                                                                                      |
-| `market_price`, `market_currency`                         | list price of a new copy                                                                                                                                                                               |
-| `market_source`, `market_url`                             | where it was found, and the page to check it                                                                                                                                                           |
-| `market_match`, `market_isbn`                             | `exact`, `similar` (another printed edition) or `manual`; the ISBN of the edition priced online (blank when the price came from the price barcode on the book itself)                                  |
-| `front_photo`                                             | this book's own cover, cut out of the set's front photo (`data\processed\<batch>\S01\01\cover.jpg`)                                                                                                    |
-| `set_photo`, `barcode_photo`                              | the whole set's front photo, and this book's barcode photo                                                                                                                                             |
-| `status`, `errors`                                        | see below; `errors` names what is still missing                                                                                                                                                        |
-| `book_source`                                             | where the book's details (title, author, publisher, year, genre ...) came from, e.g. `google+ncl`; `+manual` once you changed them in the review window. The market price's origin is `market_source`. |
-| `notes`, `created_at`                                     | bookkeeping                                                                                                                                                                                            |
+| Column                                                    | Meaning                                                                                                                                                                                                                                                                       |
+| --------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `sku`, `batch`, `set_id`, `position`                      | unique id; when it was processed; set (S01, S02 ...); number in the set (1-10)                                                                                                                                                                                                |
+| `isbn13`, `title`, `author`, `publisher`, `year`, `pages` | the book                                                                                                                                                                                                                                                                      |
+| `genre`                                                   | the book's genres, broadest first, separated by `>`: e.g. `童書 > 冒險／驚悚小說` (one chip each in the review window). Only `>`, `\|` and `;` separate genres - never `/` or `／` (part of names like 冒險／驚悚小說), commas (`Body, Mind & Spirit` is one genre) or spaces |
+| `condition`                                               | one of the five grades below (required)                                                                                                                                                                                                                                       |
+| `price`, `currency`, `price_basis`                        | your price (required) and how it was set: `40% of 300 TWD`, `caption` or `manual`                                                                                                                                                                                             |
+| `market_price`, `market_currency`                         | list price of a new copy                                                                                                                                                                                                                                                      |
+| `market_source`, `market_url`                             | where it was found, and the page to check it                                                                                                                                                                                                                                  |
+| `market_match`, `market_isbn`                             | `exact`, `similar` (another printed edition) or `manual`; the ISBN of the edition priced online (blank when the price came from the price barcode on the book itself)                                                                                                         |
+| `front_photo`                                             | this book's own cover, cut out of the set's front photo (`data\processed\<batch>\S01\01\cover.jpg`)                                                                                                                                                                           |
+| `set_photo`, `back_photo`                                 | the whole set's front photo, and this book's back photo (the whole back cover, with the barcode)                                                                                                                                                                              |
+| `front_back_photo`                                        | front + back side by side in one square picture, made with the cover cut-out (`...\01\front_back.jpg`)                                                                                                                                                                        |
+| `status`, `errors`                                        | see below; `errors` names what is still missing                                                                                                                                                                                                                               |
+| `book_source`                                             | where the book's details (title, author, publisher, year, genre ...) came from, e.g. `google+ncl`; `+manual` once you changed them in the review window. The market price's origin is `market_source`.                                                                        |
+| `notes`, `created_at`                                     | bookkeeping                                                                                                                                                                                                                                                                   |
 
 A book's set is `batch` + `set_id`; the set's code `<batch>-<set_id>` is the start of the book's `sku`. Whether a book
 is listed or sold follows its set (6.3).
@@ -373,18 +394,19 @@ Books saved earlier as `acceptable` become `fair` automatically.
 One row per set, the same whatever platform it is sold on. Made and kept up to date from `books.csv` every time
 `shopee.bat`, `python -m pipeline sets` or the set view runs.
 
-| Column                                           | Meaning                                                                                                                    |
-| ------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------- |
-| `set_code`                                       | `<batch>-<set_id>`, e.g. `20261008-153012-S01`                                                                             |
-| `book_count`                                     | books in the set                                                                                                           |
-| `set_title`, `set_price`, `currency`             | the listing title (max 60 characters) and the price of the whole set in TWD: sum of its books' prices minus `SET_DISCOUNT` |
-| `weight_g`, `length_cm`, `width_cm`, `height_cm` | parcel weight and size (Shopee works out shipping from them)                                                               |
-| `description`                                    | what buyers read: every book by number - title, author, publisher, condition, price                                        |
-| `images`                                         | its photos, in order                                                                                                       |
-| `status`, `errors`                               | see below; `errors` says what stops a draft set                                                                            |
-| `sold_on`, `sold_at`, `sold_price`               | where (`shopee`, or `manual`), when and for how much it sold                                                               |
-| `custom`                                         | the fields you changed by hand - kept instead of the automatic text                                                        |
-| `created_at`, `updated_at`, `notes`              | bookkeeping                                                                                                                |
+| Column                                                | Meaning                                                                                                                                                                                                                    |
+| ----------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `set_code`                                            | `<batch>-<set_id>`, e.g. `20261008-153012-S01`                                                                                                                                                                             |
+| `book_count`                                          | books in the set                                                                                                                                                                                                           |
+| `set_title`                                           | the listing title (max 60 characters)                                                                                                                                                                                      |
+| `original_price`, `discount`, `set_price`, `currency` | the books' prices added up, the whole-set discount in % (default `SET_DISCOUNT`, 20), and the set's price = original minus the discount, in TWD (e.g. 1,000 - 20% = 800); type the price yourself and the discount follows |
+| `weight_g`                                            | estimated weight (books x `SET_WEIGHT_PER_BOOK_G`) - Shopee needs one; store pickup charges a flat fee per parcel up to 5 kg                                                                                               |
+| `description`                                         | what buyers read: every book by number - title, author, publisher, condition, price                                                                                                                                        |
+| `images`                                              | its photos, in order                                                                                                                                                                                                       |
+| `status`, `errors`                                    | see below; `errors` says what stops a draft set                                                                                                                                                                            |
+| `sold_on`, `sold_at`, `sold_price`                    | where (`shopee`, or `manual`), when and for how much it sold                                                                                                                                                               |
+| `custom`                                              | the fields you changed by hand - kept instead of the automatic text                                                                                                                                                        |
+| `created_at`, `updated_at`, `notes`                   | bookkeeping                                                                                                                                                                                                                |
 
 | Set status  | Meaning                                                              | Its books   |
 | ----------- | -------------------------------------------------------------------- | ----------- |
@@ -456,7 +478,7 @@ buttons or `.bat` files; the rest are for fixing and checking.
 | No market price for many books                           | add a Tavily key (section 3.1); if books.com.tw blocks you, its pages are saved in `data\cache\debug`                                                                                        |
 | `books.csv is busy`                                      | close it in Excel / another program                                                                                                                                                          |
 | The bot window shows odd characters like `←[1A`          | set `PLAIN_PROGRESS=1` in `.env`                                                                                                                                                             |
-| `shopee.bat`: "Set SHOPEE_CATEGORY_ID"                   | the category was not found in the template: copy the right code from the list it shows into `.env`                                                                                           |
+| `shopee.bat`: "No category given"                        | not an error: Shopee suggests a category for each set under 尚未刊登 - check it there, or put a code from the list it shows in `SHOPEE_CATEGORY_ID`                                          |
 | Shopee rejects the upload file                           | download Seller Center's failure file for the reasons; fix, then `python -m pipeline shopee --redo <set code>`. If Shopee says the file itself is invalid, open it in Excel and save it once |
 | The order report "could not be opened"                   | it is password protected: `SHOPEE_EXPORT_PASSWORD` in `.env`, or open it in Excel and save it without a password                                                                             |
 | A set is `draft` although all books are green            | `python -m pipeline sets` says why - usually a book priced in another currency than TWD                                                                                                      |
@@ -475,17 +497,20 @@ Your `.env`, `data` and `.venv` are never part of an update. With the project in
    worth copying into your `.env`.
 
 `books.csv` from an older version is converted the first time it is saved (e.g. the column `source` became
-`book_source`; `barcode_addon`, `trademe_id`, `ebay_id` and `fb_status` are gone - selling is tracked in `sets.csv`
+`book_source`, `barcode_photo` became `back_photo`; `barcode_addon`, `trademe_id`, `ebay_id` and `fb_status` are gone - selling is tracked in `sets.csv`
 and `listings.csv`). Books you had marked `listed` / `sold` yourself keep that: their set starts as listed / sold. After an update that cuts covers better, `python -m pipeline covers --redo`
-cuts the covers of books not yet listed again.
+cuts the covers of books not yet listed again. `python -m pipeline covers` (no `--redo`) makes the front + back pictures
+of books processed before they existed.
 
 Settings that no longer exist are simply ignored (`SET_SPLIT`, `BACK_ROTATE`, `PHOTO_ORDER`, `GOOGLE_COUNTRY`,
-`BRAVE_API_KEY`, `MARKET_EBOOK`). If your `.env` was made from an older version, check these three - your old values
+`BRAVE_API_KEY`, `MARKET_EBOOK`). If your `.env` was made from an older version, check these - your old values
 override the new defaults:
 
 - `BOOK_PROVIDERS_TW=google,ncl,eslite,books_tw,openlibrary`
 - `LOOKUP_STOP_WHEN=title,author,publisher,year,genre`
 - `MARKET_PROVIDERS=barcode,ncl,eslite,books_tw`
+- `SET_DISCOUNT=20%` (older `.env` files say 0) and `SHOPEE_CATEGORY_NAME=其他書籍` (older ones say 二手書, which
+  Shopee doesn't have)
 
 ---
 

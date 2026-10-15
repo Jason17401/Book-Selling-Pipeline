@@ -35,8 +35,8 @@ def make_template(path, category=True):
     if category:
         cat = wb.create_sheet("分類")
         cat.append(["分類代碼", "分類"])
-        cat.append([100644, "書籍及雜誌期刊 > 二手書"])
-        cat.append([100645, "書籍及雜誌期刊 > 童書"])
+        cat.append(["101573-書籍及雜誌期刊/書籍/其他書籍", "101573", "2 - 15"])      # as in Shopee's real template
+        cat.append(["101541-書籍及雜誌期刊/書籍/繪本童書", "101541", "2 - 15"])
     path.parent.mkdir(parents=True, exist_ok=True)
     wb.save(path)
     return [name for _, name in cols]
@@ -44,7 +44,7 @@ def make_template(path, category=True):
 
 @pytest.fixture
 def cfg(tmp_path):
-    c = Config(data_dir=tmp_path / "data", market_providers=(), grid=(2, 4), set_size=8)
+    c = Config(data_dir=tmp_path / "data", market_providers=(), grid=(2, 4), set_size=8, set_discount=0.0)
     c.ensure_dirs()
     d = c.processed / "20261008-153012" / "S01"
     d.mkdir(parents=True)
@@ -58,7 +58,7 @@ def cfg(tmp_path):
                      "position": str(i + 1), "isbn13": TW_ISBNS[i], "title": TITLES[i], "author": "瑪麗．波．奧斯本",
                      "publisher": "小天下", "condition": "like_new", "price": "100", "currency": "TWD",
                      "market_price": "250", "market_currency": "TWD", "set_photo": str(front),
-                     "front_photo": str(front), "barcode_photo": str(bc), "status": "validated"})
+                     "front_photo": str(front), "back_photo": str(bc), "status": "validated"})
     rows[3]["status"] = "to_check"                    # one book not checked yet
     store.write_rows(c.csv_path, rows)
     return c
@@ -84,7 +84,7 @@ def test_the_set_follows_its_books(cfg):
     s = refresh_sets(cfg)[0]
     assert s["set_code"] == CODE and s["status"] == "draft" and "book(s) 4 not checked yet" in s["errors"]
     assert s["book_count"] == "8" and s["set_price"] == "800" and s["currency"] == "TWD"
-    assert s["weight_g"] == "2400" and (s["length_cm"], s["width_cm"], s["height_cm"]) == ("30", "22", "15")
+    assert s["weight_g"] == "2400" and "length_cm" not in s           # weight estimated; parcel size not needed
     assert s["set_title"].startswith(f"【{CODE}】狄更斯的耶誕頌、") and len(s["set_title"]) <= 60
     assert s["set_title"].endswith("｜二手書8本合售")
     check_all(cfg)
@@ -109,19 +109,44 @@ def test_description_lists_every_book_by_number(cfg):
 
 
 def test_discount_and_your_own_text_are_kept(cfg):
-    cfg.set_discount = 0.1
+    cfg.set_discount = Config().set_discount                   # the default: 20% off the whole set (8 折)
     check_all(cfg)
-    assert refresh_sets(cfg)[0]["set_price"] == "720"
-    s = save_set_fields(cfg, CODE, {"set_title": f"【{CODE}】神奇樹屋 8本", "weight_g": "1900"})
-    assert s["set_title"] == f"【{CODE}】神奇樹屋 8本" and s["custom"] == "set_title,weight_g"
+    s = refresh_sets(cfg)[0]
+    assert (s["original_price"], s["discount"], s["set_price"]) == ("800", "20", "640")
+    assert "整套售價：NT$640（8 本單價合計 NT$800，整套 8 折）" in s["description"]
+    s = save_set_fields(cfg, CODE, {"set_title": f"【{CODE}】神奇樹屋 8本", "weight_g": "1900", "discount": "15%"})
+    assert s["set_title"] == f"【{CODE}】神奇樹屋 8本" and s["custom"] == "discount,set_title,weight_g"
+    assert s["set_price"] == "680" and "85 折" in s["description"]          # this set: 15% off
     store.update_rows(cfg.csv_path, lambda rows: rows[0].update(price="300"))
     s = refresh_sets(cfg)[0]
     assert s["set_title"] == f"【{CODE}】神奇樹屋 8本" and s["weight_g"] == "1900"    # yours: kept
-    assert s["set_price"] == "900"                                                  # automatic: follows the books
-    s = save_set_fields(cfg, CODE, {"set_title": ""})                             # empty = automatic again
-    assert "狄更斯" in s["set_title"] and s["custom"] == "weight_g"
-    with pytest.raises(ValueError):
-        save_set_fields(cfg, CODE, {"set_price": "abc"})
+    assert (s["original_price"], s["set_price"]) == ("1000", "850")                 # follows the books' prices
+    s = save_set_fields(cfg, CODE, {"set_title": "", "discount": ""})            # empty = automatic again
+    assert "狄更斯" in s["set_title"] and s["custom"] == "weight_g" and s["set_price"] == "800"
+    for bad in ("abc", "100"):
+        with pytest.raises(ValueError):
+            save_set_fields(cfg, CODE, {"discount": bad})
+
+
+def test_set_price_and_discount_follow_each_other(cfg):
+    cfg.set_discount = Config().set_discount
+    check_all(cfg)
+    refresh_sets(cfg)
+    s = save_set_fields(cfg, CODE, {"set_price": "NT$600"})          # you type the price: the discount follows
+    assert (s["set_price"], s["discount"], s["custom"]) == ("600", "25", "set_price")
+    assert "75 折" in s["description"]
+    store.update_rows(cfg.csv_path, lambda rows: rows[0].update(price="300"))
+    s = refresh_sets(cfg)[0]                                          # the books dearer: your price is kept
+    assert (s["original_price"], s["set_price"], s["discount"]) == ("1000", "600", "40")
+    s = save_set_fields(cfg, CODE, {"discount": "10"})               # now the discount: the price follows
+    assert (s["set_price"], s["custom"]) == ("900", "discount")
+    s = save_set_fields(cfg, CODE, {"set_price": "1,200"})           # dearer than the books: no discount
+    assert (s["set_price"], s["discount"]) == ("1200", "0")
+    s = save_set_fields(cfg, CODE, {"set_price": "", "discount": ""})
+    assert (s["set_price"], s["discount"], s["custom"]) == ("800", "20", "")
+    for bad in ("abc", "0", "-5"):
+        with pytest.raises(ValueError):
+            save_set_fields(cfg, CODE, {"set_price": bad})
 
 
 def test_upload_file_is_shopees_template_filled_in(cfg):
@@ -134,9 +159,9 @@ def test_upload_file_is_shopees_template_filled_in(cfg):
     ws = openpyxl.load_workbook(res["file"])["Template"]
     row = {names[j]: ws.cell(6, j + 1).value for j in range(len(names))}
     assert ws.cell(5, 1).value == "格式"                        # the explanation rows are left alone
-    assert row["分類代碼"] == 100644                             # found in the category list (二手書)
+    assert row["分類代碼"] == 101573                             # found in the category list (其他書籍)
     assert row["商品名稱"].startswith(f"【{CODE}】") and row["主商品貨號"] == CODE
-    assert row["價格"] == 800 and row["庫存"] == 1 and row["重量"] == 2.4 and row["長度"] == 30
+    assert row["價格"] == 800 and row["庫存"] == 1 and row["重量"] == 2.4 and row["長度"] is None
     assert row["商品描述"].startswith(f"【{CODE}】二手書 8 本一套出售")
     assert row["7-ELEVEN"] == "開啟" and row["全家"] == "開啟" and row["黑貓宅急便"] == "關閉"
     assert row["規格名稱1"] is None and row["主商品圖片"] is None     # no variations; no photo links set up
@@ -147,7 +172,7 @@ def test_upload_file_is_shopees_template_filled_in(cfg):
     assert s["status"] == "listed" and len(s["images"].split(";")) == 9
     assert {b["status"] for b in books(cfg).values()} == {"listed"}
     assert li["platform"] == "shopee" and li["status"] == "exported" and li["export_file"] == str(res["file"])
-    assert li["shopee_sku"] == CODE and li["shopee_category_id"] == "100644" and li["shopee_condition"] == "二手"
+    assert li["shopee_sku"] == CODE and li["shopee_category_id"] == "101573" and li["shopee_condition"] == "二手"
     assert li["price"] == "800" and li["title"] == s["set_title"]
     # run again: nothing new; --redo puts the set in a new file again
     assert shopee.export(cfg)["file"] is None
@@ -155,14 +180,14 @@ def test_upload_file_is_shopees_template_filled_in(cfg):
     assert again["made"] == [CODE] and again["file"] != res["file"]
 
 
-def test_category_must_be_known(cfg):
+def test_category_is_optional(cfg):
     check_all(cfg)
-    make_template(cfg.template_path, category=False)
-    with pytest.raises(shopee.ShopeeError, match="SHOPEE_CATEGORY_ID"):
-        shopee.export(cfg)
-    assert the_set(cfg)["status"] == "ready"                   # nothing marked as listed
-    cfg.shopee_category_id = "100644"
-    assert shopee.export(cfg)["made"] == [CODE]
+    names = make_template(cfg.template_path, category=False)
+    res = shopee.export(cfg)                                    # no category found: Shopee will suggest one
+    assert res["made"] == [CODE] and any("No category given" in n for n in res["notes"])
+    ws = openpyxl.load_workbook(res["file"])["Template"]
+    assert ws.cell(6, names.index("分類代碼") + 1).value is None and ws.cell(6, 2).value.startswith(f"【{CODE}】")
+    assert the_listing(cfg)["shopee_category_id"] == ""
 
 
 def test_without_template_a_plain_sheet_and_a_note(cfg):

@@ -1,12 +1,12 @@
-"""Per set: ONE photo of all the front covers, then ONE barcode photo (the back cover) per book.
+"""Per set: ONE photo of all the front covers, then ONE back photo (its back cover, with the barcode) per book.
 
     photo 1      : front covers of the whole set (GRID, e.g. 2x5)
-    photos 2..11 : barcode photo of book 1, 2, ... 10 - top row left to right, then the next row left to right
+    photos 2..11 : back photo of book 1, 2, ... 10 - top row left to right, then the next row left to right
 
 Each book in books.csv keeps: front_photo (its OWN cover, cut out of the set's front photo - see segment.py),
-set_photo (the whole set's front photo, shared) and barcode_photo (its own back cover).
+set_photo (the whole set's front photo, shared) and back_photo (its own back cover).
 
-Sets are found by counting, in send order: 1 front + SET_SIZE barcode photos. A barcode that cannot be read is still
+Sets are found by counting, in send order: 1 front + SET_SIZE back photos. A barcode that cannot be read is still
 that book (marked needs_manual, you type its ISBN in), so one bad photo never shifts the books after it.
 
 Captions (Telegram caption, or a .txt next to the photo with the same name) override the counting:
@@ -14,7 +14,7 @@ Captions (Telegram caption, or a .txt next to the photo with the same name) over
   back           this photo is a book's back, never a front
   retake / again this photo replaces the previous back photo (use it right after a bad shot)
   良好 150       condition and price (both optional; 'good 150 NZD' works too, default currency DEFAULT_CURRENCY);
-                 on the front photo it applies to the whole set, on a barcode photo to that book
+                 on the front photo it applies to the whole set, on a back photo to that book
 """
 from __future__ import annotations
 
@@ -60,7 +60,7 @@ class Book:
     photos: List[Path] = field(default_factory=list)
 
     @property
-    def barcode_photo(self) -> Path:
+    def back_photo(self) -> Path:
         return self.photos[-1]    # after a retake, the newest photo is the one that counts
 
 
@@ -200,7 +200,7 @@ def process_sets(cfg: Config, decode: Callable = None, lookup: Callable = lookup
 
     def watched(read, how):
         def run(p):
-            live.step("barcodes", f"reading{how} barcode photo {names.get(p, '?')}/{len(photos)}  ({p.name})")
+            live.step("barcodes", f"reading{how} back photo {names.get(p, '?')}/{len(photos)}  ({p.name})")
             return read(p)
         return run
     decode = watched(decode, "")
@@ -253,16 +253,19 @@ def process_sets(cfg: Config, decode: Callable = None, lookup: Callable = lookup
         for pos, book in enumerate(ss.books, 1):
             book_dir = set_dir / f"{pos:02d}"
             sidecars = [_sidecar(p) for p in book.photos]
-            placed = [_place(p, book_dir, 0) for p in book.photos]     # barcode photos are kept as sent
-            cover_path = None
+            placed = [_place(p, book_dir, 0) for p in book.photos]     # back photos are kept as sent
+            cover_path = cover_img = None
             if segs is not None and pos <= len(segs):
                 from .segment import cut_book
                 try:
                     book_dir.mkdir(parents=True, exist_ok=True)
                     cover_path = book_dir / "cover.jpg"
-                    cut_book(front_img, segs[pos - 1], cfg.segment_margin, segs).save(cover_path, quality=95)
+                    cover_img = cut_book(front_img, segs[pos - 1], cfg.segment_margin, segs)
+                    cover_img.save(cover_path, quality=95)
                 except Exception:
-                    cover_path = None
+                    cover_path = cover_img = None
+            pair_path = save_front_and_back(book_dir / "front_back.jpg", cover_img, front_img, pos, placed[-1], cfg) \
+                if placed else None
             b_cond, b_price, b_cur = cond, price, currency
             for side in sidecars:
                 moved_side = book_dir / side.name
@@ -294,7 +297,8 @@ def process_sets(cfg: Config, decode: Callable = None, lookup: Callable = lookup
                 "condition": b_cond or cfg.default_condition, "price": b_price, "currency": b_cur, "price_basis": "caption" if b_price else "",
                 "front_photo": str(cover_path or front_path or ""),     # this book's own cover, cut from the set photo
                 "set_photo": str(front_path) if front_path else "",
-                "barcode_photo": str(placed[-1]),          # after a retake, the newest photo is the one that counts
+                "back_photo": str(placed[-1]),
+                "front_back_photo": str(pair_path or ""),     # front + back side by side, one square picture          # after a retake, the newest photo is the one that counts
                 "book_source": meta.get("source", ""), "created_at": now_iso,
             }
             if book.isbn and cfg.market_providers:
@@ -363,10 +367,25 @@ def describe_progress(photos: list, set_size: int) -> str:
         return "Inbox is empty. Send the FRONT photo of the first set."
     set_no, slot = pr[-1]
     if slot == -1:
-        msg = f"Set {set_no}: retake saved (replaces the previous barcode photo)."
+        msg = f"Set {set_no}: retake saved (replaces the previous back photo)."
     elif slot == 0:
-        msg = f"Set {set_no}: FRONT photo saved. Next: barcode photo of book 1."
+        msg = f"Set {set_no}: FRONT photo saved. Next: back photo of book 1."
     else:
         msg = f"Set {set_no}: barcode {slot}/{set_size} saved."
-        msg += " Set complete - next photo starts a new set (front)." if slot == set_size else f" Next: barcode photo of book {slot + 1}."
+        msg += " Set complete - next photo starts a new set (front)." if slot == set_size else f" Next: back photo of book {slot + 1}."
     return msg + f"  [{len(photos)} photo(s) waiting]"
+
+
+def save_front_and_back(dst: Path, cover, front_img, pos: int, back_path, cfg: Config):
+    """Save the book's front (its cut-out cover, or its grid cell of the set photo) and its back photo side by side as
+    one square picture. Returns the path, or None if it could not be made."""
+    from .grid import crop_book, front_and_back
+    try:
+        if cover is None and front_img is not None:
+            cover = crop_book(front_img, pos, cfg.grid, cfg.region)
+        back = load_image(back_path)
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        front_and_back(cover, back, pos).save(dst, quality=90)
+        return dst
+    except Exception:
+        return None
