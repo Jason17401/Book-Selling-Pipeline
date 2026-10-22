@@ -4,7 +4,7 @@ import json
 from pipeline.core import store
 from pipeline.core.config import Config
 from pipeline.photos.ingest import parse_caption
-from pipeline.apps.sets import build_set_listings
+from pipeline.apps.products import build_set_listings
 from synth import TW_ISBNS, book_back, set_front
 
 

@@ -1,4 +1,4 @@
-"""Selling sets: data/sets.csv, data/listings.csv, the Shopee upload file, and reading Shopee's reports back."""
+"""Selling products (sets of books): data/products.csv, data/listings.csv, the Shopee upload file, and reading Shopee's reports back."""
 import csv
 
 import openpyxl
@@ -6,7 +6,7 @@ import pytest
 from PIL import Image
 
 from pipeline.apps import shopee
-from pipeline.apps.sets import (change_set_status, refresh_sets, save_set_fields, set_description_zh,
+from pipeline.apps.products import (change_product_status, refresh_products, save_product_fields, set_description_zh,
                                 set_title_zh)
 from pipeline.core import store
 from pipeline.core.config import Config
@@ -24,7 +24,7 @@ def make_template(path, category=True):
     ws = wb.active
     ws.title = "Template"
     cols = [("ps_category", "分類代碼"), ("ps_product_name", "商品名稱"), ("ps_product_description", "商品描述"),
-            ("ps_sku_parent_short", "主商品貨號"), ("et_title_variation_1", "規格名稱1"), ("ps_price", "價格"),
+            ("ps_minimum_purchase_quantity|0|0", "最低購買數量"), ("ps_sku_parent_short", "主商品貨號"), ("et_title_variation_1", "規格名稱1"), ("ps_price", "價格"),
             ("ps_stock", "庫存"), ("ps_item_cover_image", "主商品圖片"), ("ps_item_image_1", "商品圖片 1"),
             ("ps_item_image_2", "商品圖片 2"), ("ps_weight", "重量"), ("ps_length", "長度"), ("ps_width", "寬度"),
             ("ps_height", "高度"), ("channel_30005", "7-ELEVEN"), ("channel_30006", "全家"),
@@ -37,6 +37,8 @@ def make_template(path, category=True):
         cat.append(["分類代碼", "分類"])
         cat.append(["101573-書籍及雜誌期刊/書籍/其他書籍", "101573", "2 - 15"])      # as in Shopee's real template
         cat.append(["101541-書籍及雜誌期刊/書籍/繪本童書", "101541", "2 - 15"])
+    if path.suffix.lower() != ".xlsx":            # the template folder: saved under the name Shopee gives it
+        path = path / "Shopee_mass_upload_2026-10-14_basic_template.xlsx"
     path.parent.mkdir(parents=True, exist_ok=True)
     wb.save(path)
     return [name for _, name in cols]
@@ -73,30 +75,29 @@ def check_all(cfg):
 
 
 def the_set(cfg):
-    return next(s for s in store.read_table(cfg.sets_path) if s["set_code"] == CODE)
+    return next(s for s in store.read_table(cfg.products_path) if s["product_code"] == CODE)
 
 
 def the_listing(cfg):
-    return next(li for li in store.read_table(cfg.listings_path) if li["set_code"] == CODE)
+    return next(li for li in store.read_table(cfg.listings_path) if li["product_code"] == CODE)
 
 
 def test_the_set_follows_its_books(cfg):
-    s = refresh_sets(cfg)[0]
-    assert s["set_code"] == CODE and s["status"] == "draft" and "book(s) 4 not checked yet" in s["errors"]
-    assert s["book_count"] == "8" and s["set_price"] == "800" and s["currency"] == "TWD"
-    assert s["weight_g"] == "2400" and "length_cm" not in s           # weight estimated; parcel size not needed
-    assert s["set_title"].startswith(f"【{CODE}】狄更斯的耶誕頌、") and len(s["set_title"]) <= 60
-    assert s["set_title"].endswith("｜二手書8本合售")
+    s = refresh_products(cfg)[0]
+    assert s["product_code"] == CODE and s["status"] == "draft" and "book(s) 4 not checked yet" in s["errors"]
+    assert s["book_count"] == "8" and s["price"] == "800" and s["currency"] == "TWD"
+    assert "weight_g" not in s and "length_cm" not in s               # no weight or parcel size: we do not have them
+    assert s["title"] == f"【{CODE}】二手書8本一套" and 10 <= len(s["title"]) <= 60     # set of 8 second-hand books
     check_all(cfg)
-    assert refresh_sets(cfg)[0]["status"] == "ready"
+    assert refresh_products(cfg)[0]["status"] == "ready"
     # a book priced in another currency: Shopee sells in NT$
     store.update_rows(cfg.csv_path, lambda rows: rows[2].update(currency="USD"))
-    s = refresh_sets(cfg)[0]
-    assert s["status"] == "draft" and "3 (USD)" in s["errors"] and s["set_price"] == ""
+    s = refresh_products(cfg)[0]
+    assert s["status"] == "draft" and "3 (USD)" in s["errors"] and s["price"] == ""
 
 
 def test_description_lists_every_book_by_number(cfg):
-    text = refresh_sets(cfg)[0]["description"]
+    text = refresh_products(cfg)[0]["description"]
     assert text.startswith(f"【{CODE}】二手書 8 本一套出售")
     assert "#1 狄更斯的耶誕頌\n作者：瑪麗．波．奧斯本\n出版社：小天下\n書況：近全新\n價格：NT$100（新書定價 NT$250）" in text
     assert "#8 Google必修的圖表簡報術：Google總監首度公開，教你做對圖表" in text
@@ -111,42 +112,42 @@ def test_description_lists_every_book_by_number(cfg):
 def test_discount_and_your_own_text_are_kept(cfg):
     cfg.set_discount = Config().set_discount                   # the default: 20% off the whole set (8 折)
     check_all(cfg)
-    s = refresh_sets(cfg)[0]
-    assert (s["original_price"], s["discount"], s["set_price"]) == ("800", "20", "640")
+    s = refresh_products(cfg)[0]
+    assert (s["original_price"], s["discount"], s["price"]) == ("800", "20", "640")
     assert "整套售價：NT$640（8 本單價合計 NT$800，整套 8 折）" in s["description"]
-    s = save_set_fields(cfg, CODE, {"set_title": f"【{CODE}】神奇樹屋 8本", "weight_g": "1900", "discount": "15%"})
-    assert s["set_title"] == f"【{CODE}】神奇樹屋 8本" and s["custom"] == "discount,set_title,weight_g"
-    assert s["set_price"] == "680" and "85 折" in s["description"]          # this set: 15% off
+    s = save_product_fields(cfg, CODE, {"title": f"【{CODE}】神奇樹屋 8本", "discount": "15%"})
+    assert s["title"] == f"【{CODE}】神奇樹屋 8本" and s["custom"] == "discount,title"
+    assert s["price"] == "680" and "85 折" in s["description"]          # this set: 15% off
     store.update_rows(cfg.csv_path, lambda rows: rows[0].update(price="300"))
-    s = refresh_sets(cfg)[0]
-    assert s["set_title"] == f"【{CODE}】神奇樹屋 8本" and s["weight_g"] == "1900"    # yours: kept
-    assert (s["original_price"], s["set_price"]) == ("1000", "850")                 # follows the books' prices
-    s = save_set_fields(cfg, CODE, {"set_title": "", "discount": ""})            # empty = automatic again
-    assert "狄更斯" in s["set_title"] and s["custom"] == "weight_g" and s["set_price"] == "800"
+    s = refresh_products(cfg)[0]
+    assert s["title"] == f"【{CODE}】神奇樹屋 8本"                                # yours: kept
+    assert (s["original_price"], s["price"]) == ("1000", "850")                 # follows the books' prices
+    s = save_product_fields(cfg, CODE, {"title": "", "discount": ""})            # empty = automatic again
+    assert s["title"] == f"【{CODE}】二手書8本一套" and s["custom"] == "" and s["price"] == "800"
     for bad in ("abc", "100"):
         with pytest.raises(ValueError):
-            save_set_fields(cfg, CODE, {"discount": bad})
+            save_product_fields(cfg, CODE, {"discount": bad})
 
 
 def test_set_price_and_discount_follow_each_other(cfg):
     cfg.set_discount = Config().set_discount
     check_all(cfg)
-    refresh_sets(cfg)
-    s = save_set_fields(cfg, CODE, {"set_price": "NT$600"})          # you type the price: the discount follows
-    assert (s["set_price"], s["discount"], s["custom"]) == ("600", "25", "set_price")
+    refresh_products(cfg)
+    s = save_product_fields(cfg, CODE, {"price": "NT$600"})          # you type the price: the discount follows
+    assert (s["price"], s["discount"], s["custom"]) == ("600", "25", "price")
     assert "75 折" in s["description"]
     store.update_rows(cfg.csv_path, lambda rows: rows[0].update(price="300"))
-    s = refresh_sets(cfg)[0]                                          # the books dearer: your price is kept
-    assert (s["original_price"], s["set_price"], s["discount"]) == ("1000", "600", "40")
-    s = save_set_fields(cfg, CODE, {"discount": "10"})               # now the discount: the price follows
-    assert (s["set_price"], s["custom"]) == ("900", "discount")
-    s = save_set_fields(cfg, CODE, {"set_price": "1,200"})           # dearer than the books: no discount
-    assert (s["set_price"], s["discount"]) == ("1200", "0")
-    s = save_set_fields(cfg, CODE, {"set_price": "", "discount": ""})
-    assert (s["set_price"], s["discount"], s["custom"]) == ("800", "20", "")
+    s = refresh_products(cfg)[0]                                          # the books dearer: your price is kept
+    assert (s["original_price"], s["price"], s["discount"]) == ("1000", "600", "40")
+    s = save_product_fields(cfg, CODE, {"discount": "10"})               # now the discount: the price follows
+    assert (s["price"], s["custom"]) == ("900", "discount")
+    s = save_product_fields(cfg, CODE, {"price": "1,200"})           # dearer than the books: no discount
+    assert (s["price"], s["discount"]) == ("1200", "0")
+    s = save_product_fields(cfg, CODE, {"price": "", "discount": ""})
+    assert (s["price"], s["discount"], s["custom"]) == ("800", "20", "")
     for bad in ("abc", "0", "-5"):
         with pytest.raises(ValueError):
-            save_set_fields(cfg, CODE, {"set_price": bad})
+            save_product_fields(cfg, CODE, {"price": bad})
 
 
 def test_upload_file_is_shopees_template_filled_in(cfg):
@@ -161,8 +162,11 @@ def test_upload_file_is_shopees_template_filled_in(cfg):
     assert ws.cell(5, 1).value == "格式"                        # the explanation rows are left alone
     assert row["分類代碼"] == 101573                             # found in the category list (其他書籍)
     assert row["商品名稱"].startswith(f"【{CODE}】") and row["主商品貨號"] == CODE
-    assert row["價格"] == 800 and row["庫存"] == 1 and row["重量"] == 2.4 and row["長度"] is None
-    assert row["商品描述"].startswith(f"【{CODE}】二手書 8 本一套出售")
+    assert row["價格"] == 800 and row["庫存"] == 1 and row["最低購買數量"] == 1          # both 1 unless you change them
+    assert row["重量"] is None and row["長度"] is None and row["寬度"] is None and row["高度"] is None
+    desc = the_set(cfg)["description"]
+    assert row["商品描述"] == desc and desc.count("\n") > 40 and "#8 " in desc       # the whole text, every line
+    assert ws.cell(6, names.index("商品描述") + 1).alignment.wrap_text           # Excel shows all of it
     assert row["7-ELEVEN"] == "開啟" and row["全家"] == "開啟" and row["黑貓宅急便"] == "關閉"
     assert row["規格名稱1"] is None and row["主商品圖片"] is None     # no variations; no photo links set up
     photos = sorted((cfg.listings_dir / "photos" / CODE).glob("*.jpg"))
@@ -173,7 +177,7 @@ def test_upload_file_is_shopees_template_filled_in(cfg):
     assert {b["status"] for b in books(cfg).values()} == {"listed"}
     assert li["platform"] == "shopee" and li["status"] == "exported" and li["export_file"] == str(res["file"])
     assert li["shopee_sku"] == CODE and li["shopee_category_id"] == "101573" and li["shopee_condition"] == "二手"
-    assert li["price"] == "800" and li["title"] == s["set_title"]
+    assert li["price"] == "800" and li["title"] == s["title"]
     # run again: nothing new; --redo puts the set in a new file again
     assert shopee.export(cfg)["file"] is None
     again = shopee.export(cfg, redo=[CODE])
@@ -190,13 +194,45 @@ def test_category_is_optional(cfg):
     assert the_listing(cfg)["shopee_category_id"] == ""
 
 
-def test_without_template_a_plain_sheet_and_a_note(cfg):
+def test_without_template_nothing_is_made(cfg):
     check_all(cfg)
     cfg.shopee_category_id = "100644"
+    with pytest.raises(shopee.ShopeeError, match="No Shopee template"):
+        shopee.export(cfg)
+    assert the_set(cfg)["status"] == "ready" and not store.read_table(cfg.listings_path)    # nothing changed
+    assert not list(cfg.uploads_dir.glob("shopee_upload_*")) and not (cfg.listings_dir / "photos" / CODE).exists()
+    assert {b["status"] for b in books(cfg).values()} == {"validated"}
+    from pipeline.apps import editing
+    assert editing.shopee_upload(cfg)["text"].startswith("Not done: No Shopee template")
+
+
+def test_your_own_description_goes_in_the_file(cfg):
+    names = make_template(cfg.template_path)
+    check_all(cfg)
+    refresh_products(cfg)
+    mine = "【" + CODE + "】我自己寫的介紹\n第二行\n" + "很長的一段文字。" * 100
+    save_product_fields(cfg, CODE, {"description": mine})
     res = shopee.export(cfg)
-    assert any("No Shopee template" in n for n in res["notes"])
-    ws = openpyxl.load_workbook(res["file"]).active
-    assert ws.cell(1, 2).value == "商品名稱" and ws.cell(2, 4).value == CODE
+    ws = openpyxl.load_workbook(res["file"])["Template"]
+    assert ws.cell(6, names.index("商品描述") + 1).value == mine
+
+
+def test_an_old_plain_sheet_export_is_made_again(cfg):
+    check_all(cfg)
+    refresh_products(cfg)
+    plain = cfg.shopee_dir / "shopee_upload_old.xlsx"            # what an older version wrote without a template
+    plain.parent.mkdir(parents=True, exist_ok=True)
+    wb = openpyxl.Workbook()
+    wb.active.title = "upload"
+    wb.save(plain)
+    store.update_table(cfg.products_path, store.PRODUCT_COLUMNS, lambda sets: sets[0].update(status="listed"))
+    store.write_table(cfg.listings_path, [{"product_code": CODE, "platform": "shopee", "status": "exported",
+                                           "export_file": str(plain)}], store.LISTING_COLUMNS)
+    names = make_template(cfg.template_path)
+    res = shopee.export(cfg)
+    assert res["made"] == [CODE] and any("not Shopee's template" in n for n in res["notes"])
+    assert the_listing(cfg)["export_file"] == str(res["file"]) and the_set(cfg)["status"] == "listed"
+    assert names
 
 
 def test_photo_links_when_a_bucket_is_set(cfg):
@@ -232,7 +268,7 @@ def test_orders_reserve_then_sell_the_set(cfg):
     make_template(cfg.template_path)
     check_all(cfg)
     shopee.export(cfg)
-    title = the_set(cfg)["set_title"]
+    title = the_set(cfg)["title"]
     # someone orders it
     order_report(cfg.shopee_import / "Order.all.20261012.xlsx",
                  [["2610120ABC", "待出貨", "", "", "buyer1", "2026-10-12 10:00", "800", "", "", "", CODE, title, ""]])
@@ -273,7 +309,7 @@ def test_product_list_and_pasted_link(cfg):
     check_all(cfg)
     shopee.export(cfg)
     cfg.shopee_shop_id = "55555"
-    p = cfg.data_dir / "products.csv"
+    p = cfg.data_dir / "shopee_product_list.csv"           # Shopee's own product list (not our products.csv)
     with open(p, "w", newline="", encoding="utf-8-sig") as f:
         w = csv.writer(f)
         w.writerow(["商品ID", "商品名稱", "主商品貨號", "狀態"])
@@ -291,24 +327,24 @@ def test_product_list_and_pasted_link(cfg):
 
 def test_set_status_by_hand_and_takedown_elsewhere(cfg):
     check_all(cfg)
-    refresh_sets(cfg)
-    store.write_table(cfg.listings_path, [{"set_code": CODE, "platform": "facebook", "status": "live",
+    refresh_products(cfg)
+    store.write_table(cfg.listings_path, [{"product_code": CODE, "platform": "facebook", "status": "live",
                                            "url": "https://fb.example/1"}], store.LISTING_COLUMNS)
-    msgs = change_set_status(cfg, CODE, "sold", "sold at the school fair")
+    msgs = change_product_status(cfg, CODE, "sold", "sold at the school fair")
     assert msgs == [f"{CODE} is sold: take it down on facebook (https://fb.example/1)"]
     s = the_set(cfg)
     assert s["status"] == "sold" and s["sold_on"] == "manual" and s["sold_price"] == "800" and "fair" in s["notes"]
     assert {b["status"] for b in books(cfg).values()} == {"sold"}
-    change_set_status(cfg, CODE, "ready")
+    change_product_status(cfg, CODE, "ready")
     assert the_set(cfg)["status"] == "ready" and {b["status"] for b in books(cfg).values()} == {"validated"}
     with pytest.raises(ValueError):
-        change_set_status(cfg, CODE, "reserved")
+        change_product_status(cfg, CODE, "reserved")
 
 
 def test_books_marked_listed_by_hand_before_sets_existed(cfg):
     store.update_rows(cfg.csv_path, lambda rows: [r.update(status="listed") for r in rows])
-    s = refresh_sets(cfg)[0]
-    assert s["status"] == "listed" and s["set_price"] == "800"
+    s = refresh_products(cfg)[0]
+    assert s["status"] == "listed" and s["price"] == "800"
     assert shopee.export(cfg)["made"] == []                     # already on sale: not listed twice
 
 
@@ -348,3 +384,142 @@ def test_password_protected_report(cfg, monkeypatch):
     cfg.shopee_export_password = "123456"
     shopee.run(cfg, do_export=False)
     assert the_set(cfg)["status"] == "reserved" and not locked.exists()
+
+
+def test_template_folder_any_name_and_uploads_folder(cfg):
+    check_all(cfg)
+    cfg.ensure_dirs()
+    for d in (cfg.template_dir, cfg.uploads_dir, cfg.shopee_import, cfg.photos_dir, cfg.inbox):
+        assert d.is_dir()                                         # nothing to make by hand
+    make_template(cfg.template_dir / "a_first.xlsx")
+    (cfg.template_dir / "~$a_first.xlsx").write_bytes(b"excel lock file")          # ignored
+    (cfg.template_dir / "z_second.xlsx").write_bytes(b"not used: the first one is")
+    assert shopee.find_template(cfg).name == "a_first.xlsx"
+    res = shopee.export(cfg)
+    assert res["file"].parent == cfg.uploads_dir and res["made"] == [CODE]
+
+
+def test_old_files_are_brought_up_to_date(cfg):
+    import csv
+    cfg.data_dir.mkdir(parents=True, exist_ok=True)
+    old = cfg.data_dir / "sets.csv"
+    with open(old, "w", newline="", encoding="utf-8-sig") as f:
+        w = csv.writer(f)
+        w.writerow(["set_code", "book_count", "set_title", "discount", "set_price", "status", "custom", "weight_g"])
+        w.writerow([CODE, "8", "我的標題", "", "700", "draft", "set_price,set_title,weight_g", "2400"])
+    store.write_table(cfg.listings_path, [], store.LISTING_COLUMNS)
+    with open(cfg.listings_path, "w", newline="", encoding="utf-8-sig") as f:
+        w = csv.writer(f)
+        w.writerow(["set_code", "platform", "status"])
+        w.writerow([CODE, "shopee", "delisted"])
+    tpl = cfg.shopee_dir / "template.xlsx"                        # where older versions wanted the template
+    make_template(tpl)
+    done = cfg.ensure_dirs()
+    assert len(done) == 3 and not old.exists() and (cfg.data_dir / "sets_old.csv").exists()
+    assert shopee.find_template(cfg) == cfg.template_dir / "template.xlsx"
+    p = refresh_products(cfg)[0]
+    assert (p["product_code"], p["kind"], p["title"], p["price"]) == (CODE, "set", "我的標題", "700")
+    assert p["custom"] == "price,title" and "weight_g" not in p
+    assert the_listing(cfg)["product_code"] == CODE and cfg.ensure_dirs() == []          # only once
+
+
+def test_photos_go_online_once(cfg):
+    from pipeline.apps import photohost
+    make_template(cfg.template_path)
+    check_all(cfg)
+    cfg.imgbb_api_key = "k3y"
+    sent = []
+
+    class Resp:
+        status_code = 200
+
+        def __init__(self, n):
+            self.n = n
+
+        def json(self):
+            return {"success": True, "data": {"url": f"https://i.ibb.co/x{self.n}/{self.n:02d}.jpg"}}
+
+    class Http:
+        def post(self, url, data=None, timeout=None):
+            assert url == photohost.IMGBB_URL and "k3y" not in url and data["key"] == "k3y"    # key not in the link
+            sent.append(data["name"])
+            return Resp(len(sent))
+    res = shopee.export(cfg, http=Http())
+    assert len(sent) == 9 and sent[0] == f"{CODE}-01"
+    ws = openpyxl.load_workbook(res["file"])["Template"]
+    names = [ws.cell(2, j).value for j in range(1, ws.max_column + 1)]
+    assert ws.cell(6, names.index("主商品圖片") + 1).value == "https://i.ibb.co/x1/01.jpg"
+    assert the_listing(cfg)["errors"] == ""
+    shopee.export(cfg, redo=[CODE], http=Http())                  # same photos: no new uploads
+    assert len(sent) == 9
+
+    class Down:
+        def post(self, url, data=None, timeout=None):
+            raise ConnectionError("offline")
+    (cfg.photos_dir / CODE / "links.json").unlink()
+    res = shopee.export(cfg, redo=[CODE], http=Down())
+    assert res["file"] and any("photos not put online" in n for n in res["notes"])
+
+
+def test_stock_and_minimum_purchase_quantity(cfg):
+    names = make_template(cfg.template_path)
+    check_all(cfg)
+    p = refresh_products(cfg)[0]
+    assert (p["stock"], p["min_purchase"]) == ("1", "1")
+    p = save_product_fields(cfg, CODE, {"stock": "3", "min_purchase": "2"})
+    assert (p["stock"], p["min_purchase"], p["custom"]) == ("3", "2", "")
+    for bad in ({"min_purchase": "4"}, {"stock": "0"}, {"stock": "abc"}, {"min_purchase": "1000000"}):
+        with pytest.raises(ValueError):                           # min > stock: nobody could order it
+            save_product_fields(cfg, CODE, bad)
+    assert (the_set(cfg)["stock"], the_set(cfg)["min_purchase"]) == ("3", "2")      # nothing saved
+    res = shopee.export(cfg)
+    ws = openpyxl.load_workbook(res["file"])["Template"]
+    row = {names[j]: ws.cell(6, j + 1).value for j in range(len(names))}
+    assert row["庫存"] == 3 and row["最低購買數量"] == 2
+    p = save_product_fields(cfg, CODE, {"stock": "", "min_purchase": ""})          # empty = 1 again
+    assert (p["stock"], p["min_purchase"]) == ("1", "1")
+
+
+def test_a_set_sold_per_book(cfg):
+    from pipeline.apps.products import book_title_zh, set_sell_mode
+    names = make_template(cfg.template_path)
+    refresh_products(cfg)
+    got = set_sell_mode(cfg, "20261008-153012", "S01", "book")            # each book its own product
+    assert [p["product_code"] for p in got] == [f"{CODE}-{i:02d}" for i in range(1, 9)]
+    prods = {p["product_code"]: p for p in refresh_products(cfg)}
+    assert CODE not in prods                                                 # the set itself is not for sale now
+    one = prods[f"{CODE}-01"]
+    assert one["kind"] == "book" and one["book_count"] == "1" and one["title"] == "狄更斯的耶誕頌｜瑪麗．波．奧斯本"
+    assert (one["price"], one["discount"], one["original_price"], one["stock"]) == ("100", "0", "100", "1")
+    d = one["description"]
+    assert d.startswith("狄更斯的耶誕頌\n作者：瑪麗．波．奧斯本\n出版社：小天下") and "#1" not in d and "整套" not in d
+    assert "書況：近全新" in d and "售價：NT$100（新書定價 NT$250）" in d and f"ISBN：{TW_ISBNS[0]}" in d
+    assert prods[f"{CODE}-04"]["status"] == "draft" and "not checked" in prods[f"{CODE}-04"]["errors"]
+    assert one["status"] == "ready"                                         # each book on its own: no waiting for book 4
+    assert len(book_title_zh({"title": "雪"})) >= 10                         # Shopee: at least 10 characters
+    res = shopee.export(cfg)
+    assert len(res["made"]) == 7 and f"{CODE}-04" not in res["made"]
+    ws = openpyxl.load_workbook(res["file"])["Template"]
+    rows = [{names[j]: ws.cell(r, j + 1).value for j in range(len(names))} for r in range(6, 13)]
+    first = next(r for r in rows if r["主商品貨號"] == f"{CODE}-01")
+    assert first["商品名稱"] == one["title"] and first["價格"] == 100 and first["商品描述"] == one["description"]
+    photos = sorted((cfg.photos_dir / f"{CODE}-01").glob("*.jpg"))
+    assert [p.name for p in photos] == ["01.jpg", "02.jpg"]                  # its front (cover), its back
+    assert books(cfg)["1"]["status"] == "listed" and books(cfg)["4"]["status"] == "to_check"
+    with pytest.raises(ValueError, match="listed"):                         # books on Shopee: can't go back to a set
+        set_sell_mode(cfg, "20261008-153012", "S01", "set")
+
+
+def test_back_to_one_product(cfg):
+    from pipeline.apps.products import set_sell_mode
+    check_all(cfg)
+    refresh_products(cfg)
+    save_product_fields(cfg, CODE, {"title": "【X】我的標題"})
+    set_sell_mode(cfg, "20261008-153012", "S01", "book")
+    set_sell_mode(cfg, "20261008-153012", "S01", "set")
+    prods = refresh_products(cfg)
+    assert [p["product_code"] for p in prods] == [CODE] and prods[0]["status"] == "ready"
+    change_product_status(cfg, CODE, "listed")
+    with pytest.raises(ValueError, match="the set is"):                     # the set is on sale: stays a set
+        set_sell_mode(cfg, "20261008-153012", "S01", "book")
+    assert {b["sell_as"] for b in books(cfg).values()} == {""}

@@ -1,2 +1,3 @@
 -r requirements.txt
 pytest>=8.0
+pytest-timeout>=2.2           # a stuck test fails (and shows where) instead of hanging forever

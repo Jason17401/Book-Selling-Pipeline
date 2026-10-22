@@ -17,8 +17,9 @@ def main() -> None:
     p.add_argument("--grid", help="rows x cols of the books on the front photo, e.g. 2x5 (default GRID in .env)")
     p.add_argument("--rotate", type=int, choices=[0, 90, 180, 270], help="degrees clockwise to turn the front photo upright")
     p.add_argument("--set-size", type=int, help="books per set (default SET_SIZE in .env)")
-    sub.add_parser("validate", help="re-check every book and set its status (see README: Statuses)")
-    sub.add_parser("init", help="create the data folders and show where they are")
+    sub.add_parser("validate", help="re-check every book and set its status (see DATA_AND_STATUSES.md)")
+    sub.add_parser("setup", aliases=["init"], help="create every data folder (data/inbox, data/listings/shopee/"
+                                                   "template ...) and show where they are")
     p = sub.add_parser("lookup", help="test the metadata sources for one ISBN and show exactly what each returned")
     p.add_argument("isbn")
     p.add_argument("--fresh", action="store_true", help="ignore the cache and ask the providers again (costs quota)")
@@ -66,24 +67,25 @@ def main() -> None:
     p.add_argument("--with-barcodes", action="store_true", help="also include each book's back photo, number stamped on")
     p.add_argument("--no-covers", action="store_true", help="leave out each book's own cover picture")
     p.add_argument("--force", action="store_true")
-    p = sub.add_parser("shopee", help="sell the sets on Shopee (or double-click shopee.bat): first read Shopee's "
-                                      "files in data/listings/shopee/import (order report, product list), then make "
-                                      "the bulk-upload file for every set that is ready")
+    p = sub.add_parser("shopee", help="sell the products on Shopee (= the Sell products window's upload button): first read "
+                                      "Shopee's files in data/listings/shopee/import (order report, product list), "
+                                      "then make the bulk-upload file for every product that is ready")
     p.add_argument("files", nargs="*", help="Shopee files to read instead of the import folder")
-    p.add_argument("--redo", nargs="+", default=[], metavar="SET_CODE",
-                   help="put these sets into a new upload file again (e.g. Shopee rejected the last one)")
+    p.add_argument("--redo", nargs="+", default=[], metavar="PRODUCT_CODE",
+                   help="put these products into a new upload file again (e.g. Shopee rejected the last one)")
     p.add_argument("--no-export", action="store_true", help="only read Shopee's files, make no upload file")
     p.add_argument("--open", action="store_true", help="open the folder of the upload file afterwards")
-    p = sub.add_parser("set-status", help="change a set's status by hand, e.g. sold at a market, or back to ready "
-                                          "after you deleted it on Shopee")
-    p.add_argument("set_code", help="e.g. 20261008-153012-S01 (python -m pipeline sets lists them)")
+    p = sub.add_parser("product-status", aliases=["set-status"],
+                       help="change a product's status by hand, e.g. sold at a market, or back to ready after you "
+                            "deleted it on Shopee")
+    p.add_argument("product_code", help="e.g. 20261008-153012-S01 (python -m pipeline products lists them)")
     p.add_argument("status", choices=["ready", "listed", "sold", "withdrawn"])
-    p.add_argument("--note", default="", help="a note to keep with the set")
-    p = sub.add_parser("shopee-link", help="save the Shopee link of a set you published (also possible in the review "
-                                           "window)")
-    p.add_argument("set_code")
+    p.add_argument("--note", default="", help="a note to keep with the product")
+    p = sub.add_parser("shopee-link", help="save the Shopee link of a product you published (also possible in the "
+                                           "review window)")
+    p.add_argument("product_code")
     p.add_argument("url")
-    sub.add_parser("sets", help="every set: status, price, title, and what is missing")
+    sub.add_parser("products", aliases=["sets"], help="every product: status, price, title, and what is missing")
     p = sub.add_parser("labels", help="write a printable sheet of numbers to cut out and place beside the books")
     p.add_argument("--count", type=int, default=10)
     sub.add_parser("status", help="row counts by status")
@@ -92,6 +94,9 @@ def main() -> None:
     sub.add_parser("bot", help="run the Telegram bot")
     a = ap.parse_args()
     cfg = Config.from_env()
+    a.cmd = {"init": "setup", "set-status": "product-status", "sets": "products"}.get(a.cmd, a.cmd)
+    for line in cfg.ensure_dirs():          # data folders always there; older files brought up to date
+        print("Updated:", line)
     if a.cmd == "ingest":
         from .photos.grid import parse_grid
         cfg.set_size = a.set_size or cfg.set_size
@@ -105,10 +110,14 @@ def main() -> None:
         with terminal():
             summary = process_inbox(cfg, expect=a.expect)
         print(format_summary(summary))
-    elif a.cmd == "init":
-        cfg.ensure_dirs()
-        print(f"Data folder: {cfg.data_dir.resolve()}")
-        print(f"Put (or sync) photos into: {cfg.inbox.resolve()}")
+    elif a.cmd == "setup":
+        print(f"Data folder: {cfg.data_dir.resolve()} - every folder below it is there now:")
+        for what, d in (("photos from the bot / your phone", cfg.inbox),
+                        ("Shopee's template (put the downloaded Excel file here)", cfg.template_dir),
+                        ("the Shopee upload files made for you", cfg.uploads_dir),
+                        ("Shopee's order reports, to read", cfg.shopee_import),
+                        ("each product's listing photos", cfg.photos_dir)):
+            print(f"  {what}:\n    {d.resolve()}")
     elif a.cmd == "lookup":
         import logging
         logging.basicConfig(level=logging.WARNING, format="%(message)s")
@@ -359,7 +368,7 @@ def main() -> None:
         print(f"filled {store.update_rows(cfg.csv_path, fill)} field(s)")
     elif a.cmd == "export-sets":
         from .photos.grid import parse_grid
-        from .apps.sets import build_set_listings
+        from .apps.products import build_set_listings
         res = build_set_listings(store.read_rows(cfg.csv_path), cfg, grid=parse_grid(a.grid) if a.grid else None,
                                  set_price=a.set_price, set_currency=(a.set_currency or "").upper(),
                                  with_backs=a.with_barcodes, force=a.force, numbers=not a.no_numbers,
@@ -379,39 +388,39 @@ def main() -> None:
             import os
             if hasattr(os, "startfile"):
                 os.startfile(str(exp["file"].parent))       # Windows: show the upload file in Explorer
-    elif a.cmd == "set-status":
-        from .apps.sets import change_set_status, refresh_sets
-        refresh_sets(cfg)
+    elif a.cmd == "product-status":
+        from .apps.products import change_product_status, refresh_products
+        refresh_products(cfg)
         try:
-            msgs = change_set_status(cfg, a.set_code, a.status, a.note)
+            msgs = change_product_status(cfg, a.product_code, a.status, a.note)
         except (KeyError, ValueError) as exc:
             raise SystemExit(str(exc).strip("'\""))
-        print(f"{a.set_code}: {a.status}")
+        print(f"{a.product_code}: {a.status}")
         for m in msgs:
             print("  TAKE DOWN:", m)
     elif a.cmd == "shopee-link":
         from .apps import shopee
         try:
-            li = shopee.set_link(cfg, a.set_code, a.url)
+            li = shopee.set_link(cfg, a.product_code, a.url)
         except shopee.ShopeeError as exc:
             raise SystemExit(str(exc))
-        print(f"{a.set_code}: on Shopee, item {li['shopee_item_id']}")
-    elif a.cmd == "sets":
-        from .apps.sets import SET_STATUS_HELP, refresh_sets
-        sets = refresh_sets(cfg)
-        for st in SET_STATUS_HELP:
+        print(f"{a.product_code}: on Shopee, item {li['shopee_item_id']}")
+    elif a.cmd == "products":
+        from .apps.products import PRODUCT_STATUS_HELP, refresh_products
+        sets = refresh_products(cfg)
+        for st in PRODUCT_STATUS_HELP:
             mine = [x for x in sets if x["status"] == st]
             if not mine:
                 continue
-            print(f"{st} ({len(mine)}): {SET_STATUS_HELP[st]}")
+            print(f"{st} ({len(mine)}): {PRODUCT_STATUS_HELP[st]}")
             for x in mine:
-                print(f"  {x['set_code']}  NT${x.get('set_price') or '-':<6} {x.get('set_title', '')[:60]}")
+                print(f"  {x['product_code']}  NT${x.get('price') or '-':<6} {x.get('title', '')[:60]}")
                 if x.get("errors"):
                     print(f"      {x['errors']}")
         if not sets:
-            print("no sets yet")
+            print("no products yet")
     elif a.cmd == "labels":
-        from .apps.sets import make_label_sheet
+        from .apps.products import make_label_sheet
         cfg.ensure_dirs()
         dst = cfg.data_dir / "labels.png"
         make_label_sheet(dst, a.count)
@@ -421,17 +430,17 @@ def main() -> None:
         meaning = {"needs_manual": "book not identified yet (ISBN / title / author missing)",
                    "enriched": "identified, but price or condition missing/invalid, or a photo missing",
                    "to_check": "complete - give it a quick check in the review window and Save",
-                   "validated": "checked by you, ready for a listing", "listed": "its set is on sale",
+                   "validated": "checked by you, ready for a listing", "listed": "its product (set) is on sale",
                    "sold": "sold"}
         for st in ("needs_manual", "enriched", "to_check", "validated", "listed", "sold"):
             print(f"  {st:<13}{counts.pop(st, 0):>5}   {meaning[st]}")
         for st, n in counts.items():
             print(f"  {st:<13}{n:>5}")
-        from .apps.sets import SET_STATUS_HELP, refresh_sets
-        sets = Counter(x["status"] for x in refresh_sets(cfg))
+        from .apps.products import PRODUCT_STATUS_HELP, refresh_products
+        sets = Counter(x["status"] for x in refresh_products(cfg))
         if sets:
-            print("Sets (python -m pipeline sets for details):")
-            for st, words in SET_STATUS_HELP.items():
+            print("Products (python -m pipeline products for details):")
+            for st, words in PRODUCT_STATUS_HELP.items():
                 if sets.get(st):
                     print(f"  {st:<13}{sets[st]:>5}   {words}")
     elif a.cmd == "review":

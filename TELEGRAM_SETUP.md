@@ -3,7 +3,7 @@
 You send your photos to **your own private Telegram bot**, which runs on your computer and saves them for the
 pipeline. This page creates that bot. It takes about 5 minutes and is done once.
 
-**Before you start:** you have finished README section 1 (the pipeline is installed and `.env` exists), and you have
+**Before you start:** you have double-clicked `setup.bat` ([SETUP.md](SETUP.md) steps 1-2: the pipeline is installed and `.env` exists), and you have
 Telegram on your phone. The steps below use the phone and the computer side by side.
 
 ---
@@ -55,7 +55,7 @@ Right now anyone who finds your bot could send it photos. Lock it to your accoun
 1. Send any photo to the bot. It replies `Set 1: FRONT photo saved ...`.
 2. Send `/undo`. It replies `Removed the last photo.`
 
-Your bot is ready. **Continue with [README section 3 - Before your first set](README.md#3-before-your-first-set).**
+Your bot is ready. **Continue with [SETUP.md step 4 - Free keys for finding more books](SETUP.md#4-free-keys-for-finding-more-books).**
 
 ---
 

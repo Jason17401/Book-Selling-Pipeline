@@ -30,6 +30,11 @@ def gui(monkeypatch):
     monkeypatch.setattr(mod.QMessageBox, "question", staticmethod(lambda *a, **k: mod.QMessageBox.StandardButton.Save))
     monkeypatch.setattr(mod.QMessageBox, "warning", staticmethod(lambda *a, **k: None))
     monkeypatch.setattr(mod.QMessageBox, "information", staticmethod(lambda *a, **k: None))
+    # nothing may wait for a person or open windows on the computer running the tests: a real file dialog would sit
+    # there forever (offscreen, nobody to click it), and Explorer / the browser would really open
+    monkeypatch.setattr(mod.QFileDialog, "getOpenFileNames", staticmethod(lambda *a, **k: ([], "")))
+    monkeypatch.setattr(mod, "open_folder", lambda path: None)
+    monkeypatch.setattr(mod.QDesktopServices, "openUrl", staticmethod(lambda *a, **k: True))
 
     def settle():
         if app is not None:
@@ -223,11 +228,11 @@ def test_to_check_books_show_and_save_confirms(gui, cfg):
     assert "checked" in w.book_items()[i].text(0)
 
 
-def test_sets_window(gui, cfg):
-    from pipeline.apps.sets import refresh_sets
-    w = gui.SetsWindow(cfg)
+def test_sell_window(gui, cfg, monkeypatch):
+    from pipeline.apps.products import refresh_products
+    w = gui.SellWindow(cfg)
     gui.settle()
-    assert w.list.topLevelItemCount() == 1 and w.current["set_code"] == "b-S01" and w.current["status"] == "draft"
+    assert w.list.topLevelItemCount() == 1 and w.current["product_code"] == "b-S01" and w.current["status"] == "draft"
     assert "not checked yet" in w.state.text()
     assert w.discount.text() == "20" and "% off" in w.list.topLevelItem(0).text(0)
     w.discount.setText("25")
@@ -244,28 +249,53 @@ def test_sets_window(gui, cfg):
     assert w.discount.text() == "17.3" and w.zhe.text() == ""
     w.discount.setText("25")                                # ... and the discount changes the price
     w.discount.textEdited.emit("25")
-    assert w.price.text() == "750" and w._fields()["discount"] == "25" and "set_price" not in w._fields()
+    assert w.price.text() == "750" and w._fields()["discount"] == "25" and "price" not in w._fields()
     w.title.setText("【b-S01】三本書")
     assert w.save() is True
-    s = refresh_sets(cfg)[0]
-    assert s["set_title"] == "【b-S01】三本書" and s["custom"] == "discount,set_title" and s["discount"] == "25"
+    s = refresh_products(cfg)[0]
+    assert s["title"] == "【b-S01】三本書" and s["custom"] == "discount,title" and s["discount"] == "25"
     w.price.setText("1,234")
     w.price.textEdited.emit("1,234")
-    assert w._fields()["set_price"] == "1,234" and "discount" not in w._fields()
+    assert w._fields()["price"] == "1,234" and "discount" not in w._fields()
     assert w.save() is True
-    s = refresh_sets(cfg)[0]
-    assert s["custom"] == "set_price,set_title" and s["set_price"] == "1234"
+    s = refresh_products(cfg)[0]
+    assert s["custom"] == "price,title" and s["price"] == "1234"
+    w.description.setPlainText("我的介紹\n第二行")             # typed, not saved: asked (Save) before going on
+    assert w.unsaved()
     w.status_box.setCurrentIndex(w.status_box.findData("withdrawn"))
     w.change_status()
-    assert refresh_sets(cfg)[0]["status"] == "withdrawn" and w.current["status"] == "withdrawn"
+    assert refresh_products(cfg)[0]["description"] == "我的介紹\n第二行" and not w.unsaved()
+    assert refresh_products(cfg)[0]["status"] == "withdrawn" and w.current["status"] == "withdrawn"
     w.link_edit.setText("https://shopee.tw/x-i.1.2")
     w.save_link()
-    assert refresh_sets(cfg)[0]["status"] == "listed" and "item 2" in w.message.text()
+    assert refresh_products(cfg)[0]["status"] == "listed" and "item 2" in w.message.text()
     shown = []
-    gui.QMessageBox.information = staticmethod(lambda parent, title, text: shown.append(text))
+    monkeypatch.setattr(gui.QMessageBox, "information", staticmethod(lambda parent, title, text: shown.append(text)))
+    w.title.setText("【b-S01】新標題")
+    w.reject()                                              # closing asks first: Save
+    assert refresh_products(cfg)[0]["title"] == "【b-S01】新標題"
     w.make_upload()
     gui.settle()
-    assert shown and "No set is ready" in shown[0]
+    assert shown and "No product is ready" in shown[0]
+    assert w.again_btn.isEnabled() and w.upload_btn.text() == "Make Shopee upload file"
+    w.upload_again()                                        # Shopee rejected it: a new upload file for it
+    gui.settle()
+    assert "No Shopee template" in shown[-1] and w.again_btn.text() == "Make a new upload file for it"
+    import csv
+    report = cfg.data_dir / "Shopee product list.csv"       # 'Read Shopee report...': a file you choose
+    with open(report, "w", newline="", encoding="utf-8-sig") as f:
+        csv.writer(f).writerows([["商品ID", "商品名稱", "主商品貨號", "狀態"], ["24680", "x", "b-S01", "上架中"]])
+    monkeypatch.setattr(gui.QFileDialog, "getOpenFileNames", staticmethod(lambda *a, **k: ([str(report)], "")))
+    w.read_report()
+    gui.settle()
+    from pipeline.core import store as st
+    li = next(x for x in st.read_table(cfg.listings_path) if x["product_code"] == "b-S01")
+    assert li["shopee_item_id"] == "24680" and "Read 1 Shopee file" in shown[-1] and report.exists()
+    opened = []
+    monkeypatch.setattr(gui, "open_folder", opened.append)
+    (cfg.photos_dir / "b-S01").mkdir(parents=True)
+    w.open_photos()
+    assert opened == [cfg.photos_dir / "b-S01"]
 
 
 def test_sets_fold_and_refresh(gui, cfg):
@@ -279,7 +309,7 @@ def test_sets_fold_and_refresh(gui, cfg):
     w.list.itemCollapsed.emit(top)
     w.reload()                                             # ... and it stays folded after a refresh (Ctrl+R)
     assert not w.list.topLevelItem(0).isExpanded()
-    assert "Ctrl+R" in w.refresh_btn.text() and "Sell sets" in w.sets_btn.text()
+    assert "Ctrl+R" in w.refresh_btn.text() and "Sell products" in w.sell_btn.text()
 
 
 def test_genres_are_chips(gui, cfg):
@@ -313,3 +343,40 @@ def test_whole_set_photo_is_numbered(cfg):
     plain = Image.open(io.BytesIO(editing.thumbnail_bytes(cfg, whole["path"], 400)))
     marked = Image.open(io.BytesIO(editing.thumbnail_bytes(cfg, whole["path"], 400, 0, True, whole["mark"])))
     assert plain.size == marked.size and plain.tobytes() != marked.tobytes()   # numbers drawn on it
+
+
+def test_stock_and_minimum_purchase_in_sell_window(gui, cfg, monkeypatch):
+    from pipeline.apps.products import refresh_products
+    w = gui.SellWindow(cfg)
+    gui.settle()
+    assert (w.stock.text(), w.min_purchase.text()) == ("1", "1") and not w.unsaved()
+    warned = []
+    monkeypatch.setattr(gui.QMessageBox, "warning", staticmethod(lambda parent, title, text: warned.append(text)))
+    w.stock.setText("3")
+    w.min_purchase.setText("4")
+    w.min_purchase.textEdited.emit("4")
+    assert "more than the stock" in w.quantity_note.text() and w.unsaved()
+    assert w.save() is False and "more than the stock" in warned[-1]          # nothing saved
+    assert refresh_products(cfg)[0]["stock"] == "1"
+    w.min_purchase.setText("2")
+    w.min_purchase.textEdited.emit("2")
+    assert w.quantity_note.text() == "" and w.save() is True
+    p = refresh_products(cfg)[0]
+    assert (p["stock"], p["min_purchase"]) == ("3", "2") and (w.stock.text(), w.min_purchase.text()) == ("3", "2")
+
+
+def test_sell_a_set_per_book(gui, cfg):
+    w = gui.ReviewWindow(cfg)
+    gui.settle()
+    ed = w.editor
+    assert ed.sell_mode.currentData() == "set"                              # one product, unless you choose
+    ed.sell_mode.setCurrentIndex(ed.sell_mode.findData("book"))
+    ed._sell_mode_chosen()
+    gui.settle()
+    assert {r.get("sell_as") for r in store.read_rows(cfg.csv_path)} == {"book"}
+    assert "sold per book" in w.list.topLevelItem(0).text(0) and w.editor.sell_mode.currentData() == "book"
+    s = gui.SellWindow(cfg)
+    gui.settle()
+    assert s.list.topLevelItemCount() == 3 and s.current["kind"] == "book"   # 3 books, 3 products
+    assert s.list.topLevelItem(0).text(0).startswith("#5 Done  ·  Set S01  ·  batch b")
+    assert s.title_label.text().startswith("#5 Done") and "book's own price" not in s.original.text()  # NZD: no total

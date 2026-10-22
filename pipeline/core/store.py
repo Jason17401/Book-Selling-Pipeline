@@ -13,21 +13,25 @@ COLUMNS = [
     "sku", "batch", "set_id", "position", "isbn13", "title", "author", "publisher", "year", "pages", "genre",
     "condition", "price", "currency", "price_basis",
     "market_price", "market_currency", "market_source", "market_url", "market_match", "market_isbn", "front_photo", "set_photo",
-    "back_photo", "front_back_photo", "status", "errors", "book_source", "created_at", "notes",
+    "back_photo", "front_back_photo", "status", "errors", "book_source", "sell_as", "created_at", "notes",
 ]
+# sell_as (the same for every book of a set): "" = the set is sold as ONE product; "book" = each book is its own product
 # status: needs_manual -> enriched -> to_check -> validated -> listed -> sold   (meanings: pipeline/core/validate.py)
 # A book belongs to the set batch + set_id; that set's code is "<batch>-<set_id>" - the start of the book's sku.
 
-# data/sets.csv - one row per set, the same whatever platform it is sold on (pipeline/apps/sets.py)
-SET_COLUMNS = [
-    "set_code", "book_count", "set_title", "original_price", "discount", "set_price", "currency", "weight_g",
+# data/products.csv - one row per PRODUCT: what you sell as one thing, the same whatever platform it is sold on
+# (pipeline/apps/products.py). kind = "set" (the books of one set photo, sold together; code "<batch>-<set_id>") or
+# "book" (one book on its own; code = its sku - for later). Each platform's copy of it is a row in listings.csv.
+PRODUCT_COLUMNS = [
+    "product_code", "kind", "book_count", "title", "original_price", "discount", "price", "currency", "stock",
+    "min_purchase",
     "description", "images", "status", "errors", "sold_on", "sold_at", "sold_price", "custom", "created_at",
     "updated_at", "notes",
 ]
-# data/listings.csv - one row per set per platform (pipeline/apps/shopee.py). Columns in groups: every platform, then
+# data/listings.csv - one row per product per platform (pipeline/apps/shopee.py). Columns in groups: every platform, then
 # one group per platform (a Facebook Marketplace group can be added later the same way: fb_...).
 LISTING_COMMON = [
-    "set_code", "platform", "status", "title", "price", "currency", "url", "export_file", "exported_at", "listed_at",
+    "product_code", "platform", "status", "title", "price", "currency", "url", "export_file", "exported_at", "listed_at",
     "updated_at", "delisted_at", "last_synced_at", "errors",
 ]
 LISTING_SHOPEE = [
@@ -36,6 +40,48 @@ LISTING_SHOPEE = [
     "shopee_payout",
 ]
 LISTING_COLUMNS = LISTING_COMMON + LISTING_SHOPEE
+
+
+def migrate_old_files(data_dir) -> list:
+    """Files written by older versions, brought up to date (once). Returns what was done, to show.
+    - data/sets.csv -> data/products.csv (set_code -> product_code, set_title -> title, set_price -> price, kind = set)
+    - data/listings.csv: set_code -> product_code
+    - data/listings/shopee/template.xlsx -> data/listings/shopee/template/ (the template folder)"""
+    data_dir = Path(data_dir)
+    done = []
+    old, new = data_dir / "sets.csv", data_dir / "products.csv"
+    if old.exists() and not new.exists():
+        rename = {"set_code": "product_code", "set_title": "title", "set_price": "price"}
+        with locked(old):
+            rows = []
+            for r in read_table(old):
+                r = {rename.get(k, k): v for k, v in r.items()}
+                r["kind"] = r.get("kind") or "set"
+                r["custom"] = ",".join(sorted(rename.get(c, c) for c in (r.get("custom") or "").split(",")
+                                              if c and c != "weight_g"))
+                rows.append(r)
+            write_table(new, rows, PRODUCT_COLUMNS)
+            os.replace(old, data_dir / "sets_old.csv")
+        done.append(f"{old.name} is now {new.name} (the old file is kept as sets_old.csv)")
+    listings = data_dir / "listings.csv"
+    if listings.exists():
+        with locked(listings):
+            with open(listings, newline="", encoding="utf-8-sig") as f:
+                header = next(csv.reader(f), [])
+            if "set_code" in header and "product_code" not in header:
+                rows = [{("product_code" if k == "set_code" else k): v for k, v in r.items()}
+                        for r in read_table(listings)]
+                write_table(listings, rows, LISTING_COLUMNS)
+                done.append("listings.csv: set_code is now product_code")
+    shopee = data_dir / "listings" / "shopee"
+    tpl = shopee / "template.xlsx"
+    if tpl.is_file():
+        (shopee / "template").mkdir(parents=True, exist_ok=True)
+        dst = shopee / "template" / "template.xlsx"
+        if not dst.exists():
+            os.replace(tpl, dst)
+            done.append(f"the Shopee template moved into {dst.parent}")
+    return done
 
 
 class FileBusy(RuntimeError):
@@ -153,7 +199,7 @@ def write_rows(path, rows: list) -> None:
 
 
 def update_table(path, columns: list, change: Callable[[list], object], upgrade=None):
-    """Like update_rows, for any of the CSV files (sets.csv, listings.csv)."""
+    """Like update_rows, for any of the CSV files (products.csv, listings.csv)."""
     with locked(path):
         rows = read_table(path, upgrade)
         result = change(rows)

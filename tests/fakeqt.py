@@ -121,6 +121,9 @@ class QWidget(QObject):
     def isHidden(self):
         return not self._visible
 
+    def reject(self):                      # QDialog: closing it
+        self._visible = False
+
     def findChildren(self, *a):
         return []
 
@@ -312,6 +315,14 @@ class _Layout(QObject):
         return _LayoutItem(self._items.pop(i))
 
 
+class QFileDialog:
+    chosen: list = []                       # what the next "open file" dialog returns
+
+    @staticmethod
+    def getOpenFileNames(*a, **k):
+        return list(QFileDialog.chosen), ""
+
+
 class QMessageBox:
     class StandardButton:
         Save, Discard, Cancel = 1, 2, 4
@@ -477,7 +488,8 @@ def install(monkeypatch) -> None:
     gui.QColor = gui.QIcon = gui.QKeySequence = gui.QFont = gui.QPen = _Any
     gui.QDesktopServices = _Any()
     for name in ("QWidget", "QLabel", "QLineEdit", "QPlainTextEdit", "QComboBox", "QPushButton", "QCheckBox",
-                 "QListWidget", "QListWidgetItem", "QMessageBox", "QTreeWidget", "QTreeWidgetItem", "QSizePolicy"):
+                 "QListWidget", "QListWidgetItem", "QMessageBox", "QTreeWidget", "QTreeWidgetItem", "QSizePolicy",
+                 "QFileDialog"):
         setattr(widgets, name, globals()[name])
     widgets.QToolButton = type("QToolButton", (QPushButton,), {})
     widgets.QStyledItemDelegate = _Any

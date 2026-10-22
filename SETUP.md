@@ -1,0 +1,224 @@
+# Setup (once)
+
+Everything you do **once** before using the pipeline, in order - about 30 minutes, plus 10 for Shopee. In short:
+**double-click `setup.bat`**, fill in `.env`, then use `bot.bat` and `review.bat`. Afterwards,
+[DAILY_USE.md](DAILY_USE.md) is all you need. Written for Windows.
+
+1. [Install](#1-install)
+2. [The data folders](#2-the-data-folders)
+3. [Set up the Telegram bot](#3-set-up-the-telegram-bot)
+4. [Free keys for finding more books](#4-free-keys-for-finding-more-books)
+5. [Photograph your first set](#5-photograph-your-first-set)
+6. [Get ready to sell on Shopee](#6-get-ready-to-sell-on-shopee)
+7. [Photo links: photos online automatically](#7-photo-links-photos-online-automatically)
+
+---
+
+## 1. Install
+
+### 1.1 You need
+
+- **Python 3.11 or 3.12** from [python.org](https://www.python.org/downloads/). In the installer, tick
+  **"Add python.exe to PATH"**.
+- **Telegram** on your phone (and a Telegram account).
+
+### 1.2 Double-click `setup.bat`
+
+In the `Book Selling Pipeline` folder, double-click **`setup.bat`**. A window shows each step:
+
+| Step | What it does |
+|---|---|
+| 1 | makes a private Python environment, `.venv`, inside the folder (or reuses it) |
+| 2-3 | updates pip and installs everything the pipeline needs into `.venv` - a few minutes the first time |
+| 4 | makes your settings file **`.env`** from `.env.example` - only if you have none yet, so your keys are never overwritten |
+| 5 | makes the data folders (step 2 below) |
+| 6 | runs the tests (about a minute; they use made-up photos and no internet) |
+
+It ends with **"Setup done"** and opens the new `.env` in Notepad. If a step fails (e.g. no internet), it stops and
+says which; fix it and double-click `setup.bat` again - repeating it is always safe. Run it again **after every
+update** too: it installs anything new and brings your data files up to date.
+
+`.env` holds your settings and keys. You fill in the Telegram part in step 3; everything else already has working
+values, and each setting is explained in `.env` itself. Keep keys only in `.env` - it is never uploaded to Git.
+
+### 1.3 Typing commands yourself (optional)
+
+Day to day you only double-click `bot.bat` and `review.bat`. For the extra commands in
+[DAILY_USE.md](DAILY_USE.md#7-all-commands), open PowerShell in the folder (in File Explorer type `powershell` in the
+address bar and press Enter) and switch it to the project's Python first:
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+python -m pipeline lookup 9789861371955
+```
+
+The prompt then starts with `(.venv)`. If PowerShell says **"running scripts is disabled"**, run
+`Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` once, answer `Y`, and try again. The look-up above prints what
+each book source found for that ISBN (被討厭的勇氣) - a good first check that the internet sources work.
+
+<details>
+<summary>What setup.bat runs, if you'd rather do it by hand (or on macOS / Linux)</summary>
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1          # macOS / Linux: source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements-dev.txt
+Copy-Item .env.example .env             # macOS / Linux: cp .env.example .env  (only the first time)
+python -m pipeline setup
+python -m pytest
+```
+</details>
+
+---
+
+## 2. The data folders
+
+`setup.bat` made the `data` folder and everything in it (`python -m pipeline setup` shows where each one is):
+
+```
+data\
+├── inbox\                     photos from the bot wait here until processed
+├── processed\                 photos after processing, one folder per batch and set
+├── listings\
+│   ├── photos\                each product's listing photos (<product code>\01.jpg ...)
+│   └── shopee\
+│       ├── template\          ← put Shopee's template here (step 6)
+│       ├── uploads\           the upload files made for you
+│       └── import\            Shopee reports can also be dropped here
+└── cache\
+```
+
+Nothing needs creating by hand: the bot and the review window also make any missing folder when they start.
+
+---
+
+## 3. Set up the Telegram bot
+
+Follow **[TELEGRAM_SETUP.md](TELEGRAM_SETUP.md)** - about 5 minutes: you create your own bot, put its token and your
+user id into `.env`, and send it a first photo. It ends by sending you back here.
+
+---
+
+## 4. Free keys for finding more books
+
+Put them in `.env`. Everything works without them; you just find fewer books and prices automatically.
+
+| Key | What it adds | How to get it |
+|---|---|---|
+| `GOOGLE_BOOKS_API_KEY` | Google Books as a book source (1,000 look-ups a day) | [Google Cloud Console](https://console.cloud.google.com/): create a project → **APIs & Services → Library** → enable **Books API** → **Credentials → Create credentials → API key**. Then edit the key and under **API restrictions** choose Books API. |
+| `TAVILY_API_KEY` | web search for books the shops' own search can't find (often out of print) | sign up at [tavily.com](https://tavily.com) - 1,000 searches a month, no credit card |
+| `LANGSEARCH_API_KEY` | a second web search, used when Tavily is used up | sign up at [langsearch.com](https://langsearch.com) - free daily allowance |
+
+---
+
+## 5. Photograph your first set
+
+1. Lay the books in a grid: by default **2 rows of 5** (`GRID=2x5`, `SET_SIZE=10`). Book 1 is top-left, then left to
+   right along the row, then the next row. Leave a small gap between books if you can, on a plain surface that
+   contrasts with the covers - each book's cover picture is cut out of this photo automatically.
+2. **Photo 1:** all the front covers together, in landscape, straight from above. Send it **as a File** (in Telegram:
+   paperclip → File) for sharp cover pictures - a normal Telegram photo is shrunk to about 1280 px.
+3. **Photos 2-11:** the back cover of each book with its barcode, in book order 1 → 10. Fill the frame, keep the
+   barcode sharp and without glare. A normal photo is plenty.
+
+Send them as described in [DAILY_USE.md](DAILY_USE.md#2-send-a-set-in-telegram), then look at the **review sheet**
+the bot sends back: on each row, the book's cover (cut out of the front photo) and its back photo must be the same
+book.
+
+**How the covers are cut out.** The pipeline finds each book on the front photo (where it differs from the table, and
+the straight edges between books), straightens slightly turned books, and saves each one at full resolution with a
+small margin of table around it (`SEGMENT_MARGIN`, default 4% of the book's size). A book's shadow on the table is not
+counted as book, so the cover sits in the middle of its picture, and the margin never reaches past halfway to the next
+book. The numbering stays the grid order, so book N's cover always pairs with back photo N. To see how a photo is cut:
+```powershell
+python -m pipeline segment path\to\front.jpg --covers covers_test
+```
+It writes `segments.jpg` with every book's box and number (green = found, orange = not clearly found, so the plain grid
+cell is used) and the cut-out covers into `covers_test`. If a layout keeps confusing it, `SEGMENT=grid` goes back to
+equal cells.
+
+If the numbers sit on the wrong books because the front photo arrives **sideways**, run this once on that photo:
+```powershell
+python -m pipeline orient data\processed\<batch>\S01\front.jpg
+```
+It writes `orient.jpg` with the photo turned four ways. Put the number of the upright, landscape one into `.env` as
+`ROTATE=` and restart the bot. (Only the front photo is turned; barcodes read in any direction.)
+If there is empty table around the books, `REGION` trims it - see `.env`.
+
+---
+
+## 6. Get ready to sell on Shopee
+
+**What the pipeline does, and where it stops.** Shopee only opens its automation API to Shopee Mall sellers and
+registered companies in Taiwan, and a robot clicking through Seller Center would put your shop at risk. So the pipeline
+uses Shopee's own **bulk upload (大量上傳)**: it fills in Shopee's Excel template for you, and **you upload that file**
+in Seller Center (about a minute), then check and publish there. Everything before and after that is automatic.
+
+1. **Shopee's template.** Seller Center → 我的商品 → 新增商品 → **大量上傳** → download the **基礎模板** (basic
+   template) and put the file - **keep the name Shopee gave it** - into `data\listings\shopee\template\`. The only (or
+   first, by name) Excel file in that folder is used, so to change templates replace the file. If it is an old `.xls`
+   file, open it in Excel and **Save As → Excel Workbook (.xlsx)** into the same folder. Shopee lists only the delivery
+   options switched on in your shop, so download it again after changing them. **Without the template nothing is
+   made** - no upload file, and nothing changes status - since Shopee accepts only its own file. The upload files the
+   pipeline makes go to the folder next to it, `data\listings\shopee\uploads\`. (For an English explanation of every
+   column, see `Shopee_mass_upload_basic_template_ENGLISH.xlsx` → *Column Guide*, if you kept it.)
+2. **Category - optional, nothing to set.** The template marks 分類代碼 as 選填 (optional). Products go in **101573
+   其他書籍** (Books & Magazines > Books > Other Books) when the template's category list has it; otherwise the column is
+   left blank and Shopee suggests a category for each product under 尚未刊登 - check it there before publishing. To
+   always use one, set `SHOPEE_CATEGORY_ID` in `.env` (e.g. 101541 繪本童書 for children's books).
+3. **Delivery and price** in `.env`: `SHOPEE_LOGISTICS` (the delivery options to switch on, e.g. 7-ELEVEN, 全家,
+   蝦皮店到店), and `SET_DISCOUNT`, the whole-set discount (default 20% off the sum of its books' prices = 8 折;
+   changeable per product in **Sell products**). Nothing to weigh or measure: weight and parcel size (重量 / 長度 /
+   寬度 / 高度) are optional in the template and left empty.
+4. **Order report password:** Shopee's order report is password protected (usually the last 6 digits of your phone).
+   Put it in `SHOPEE_EXPORT_PASSWORD` so the report opens automatically.
+5. *Optional:* `data\listings\description_footer.txt` - the lines at the end of every set's description, and
+   `description_footer_book.txt` - the same for a book sold on its own (both made on the first run; edit freely).
+6. *Optional but recommended:* photo links (step 7). Without them you drag 9 photos into each product in Seller
+   Center.
+
+---
+
+## 7. Photo links: photos online automatically
+
+Shopee's bulk upload takes photos only as **web links** (a direct link to a `.jpg`). With a photo host set up,
+**Make Shopee upload file** (in Sell products) puts each product's photos online by itself and writes their links into the upload file - no dragging
+photos into Seller Center. Each photo is uploaded once: its link is remembered in
+`data\listings\photos\<product code>\links.json` and reused until the photo changes. Shopee copies the photos when it
+reads the upload file, so the links only need to work until the product is published - but both options below keep
+them for good.
+
+**Google Drive won't do:** its share links open a Drive page, not the picture, and the old "direct" Drive links
+(`uc?export=view`) have been blocked for other sites since early 2024 - Shopee can't fetch them.
+
+### Option A - ImgBB (recommended: free, no card, 5 minutes)
+
+[ImgBB](https://imgbb.com) is a free image host with an upload API: every photo gets a permanent direct link
+(`https://i.ibb.co/.../01.jpg`). Uploads are free and kept unless you delete them (or set an expiry, which the
+pipeline doesn't).
+
+1. Sign up at [imgbb.com](https://imgbb.com) (free).
+2. Open [api.imgbb.com](https://api.imgbb.com) while signed in → **Get API key** → copy it.
+3. In `.env`: `IMGBB_API_KEY=<your key>` (and leave `PHOTO_HOST=` blank, or write `PHOTO_HOST=imgbb`).
+
+That's all - the next **Make Shopee upload file** puts the photos online. The key travels inside the upload request, never in a link.
+Anyone with a photo's link can see it (as on Shopee itself).
+
+### Option B - Cloudflare R2 (more control; needs a card to switch on)
+
+A bucket of your own: 10 GB free, no fees for downloads. Cloudflare asks for a card or PayPal to switch R2 on, even on
+the free plan.
+
+1. [dash.cloudflare.com](https://dash.cloudflare.com) → R2 → create a bucket (e.g. `books`) → Settings → **Public
+   access: allow r2.dev subdomain**. Note the public URL (`https://pub-....r2.dev`). (The `r2.dev` address is
+   rate-limited - fine here, since Shopee copies each photo once.)
+2. R2 → **Manage API tokens** → create a token with **Object Read & Write** for that bucket. Note the access key id,
+   secret and the S3 endpoint (`https://<account id>.r2.cloudflarestorage.com`).
+3. In `.env`: `PHOTO_HOST=s3`, `IMAGE_PUBLIC_URL=https://pub-....r2.dev`, `S3_ENDPOINT_URL=...`, `S3_BUCKET=books`,
+   `S3_ACCESS_KEY_ID=...`, `S3_SECRET_ACCESS_KEY=...`, and install the uploader once: `python -m pip install boto3`
+
+If a photo can't be put online (no internet, wrong key), the upload file is still made - that product just has no photo
+links, and the result message says why.
+
+Setup done. From now on: **[DAILY_USE.md](DAILY_USE.md)**.

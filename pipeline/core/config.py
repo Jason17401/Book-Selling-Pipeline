@@ -80,10 +80,9 @@ class Config:
     decode_effort: str = "normal"  # fast | normal | max
     bot_timeout: float = 30.0  # seconds the Telegram bot waits for Telegram before retrying (BOT_TIMEOUT)
     settle_seconds: int = 5  # ignore files modified in the last N seconds (still syncing)
-    # selling a set (pipeline/apps/sets.py) and Shopee (pipeline/apps/shopee.py)
+    # selling a set (pipeline/apps/products.py) and Shopee (pipeline/apps/shopee.py)
     set_discount: float = 0.2          # set price = sum of the books' prices minus this fraction (0.2 = 20% off)
-    set_weight_per_book_g: int = 300   # a set's weight for Shopee (required there): books x this, an estimate is fine
-    shopee_template: str = ""          # Shopee's bulk-upload template, saved as .xlsx (blank = data/listings/shopee/template.xlsx)
+    shopee_template: str = ""          # Shopee's bulk-upload template: a file or a folder (blank = data/listings/shopee/template/)
     shopee_category_id: str = ""       # 分類代碼 of the category to list in (blank = search the template for shopee_category_name)
     shopee_category_name: str = "其他書籍"
     shopee_logistics: tuple = ("7-eleven", "全家", "萊爾富", "ok", "蝦皮店到店")   # delivery options switched on
@@ -91,11 +90,24 @@ class Config:
     shopee_max_images: int = 9
     shopee_shop_id: str = ""           # your shop's number, to build product links (blank = links only from what you paste)
     shopee_export_password: str = ""   # password of Shopee's order report (it is protected), to open it automatically
-    image_public_url: str = ""         # photos online at <this>/<set code>/01.jpg ... (blank = you add photos by hand)
+    # photos online, so their links go in the upload file (blank PHOTO_HOST: imgbb if IMGBB_API_KEY is set, s3 if
+    # S3_BUCKET is set, else none = you add the photos by hand in Seller Center)
+    photo_host: str = ""               # imgbb | s3 | none
+    imgbb_api_key: str = ""
+    image_public_url: str = ""         # s3: photos online at <this>/<product code>/01.jpg ...
     s3_endpoint_url: str = ""          # S3-compatible bucket (e.g. Cloudflare R2) the photos are uploaded to
     s3_bucket: str = ""
     s3_access_key_id: str = ""
     s3_secret_access_key: str = ""
+
+    @property
+    def photo_service(self) -> str:
+        """Where the listing photos go online: imgbb, s3 or '' (nowhere - you add them by hand)."""
+        if self.photo_host == "none":
+            return ""
+        if self.photo_host:
+            return self.photo_host
+        return "imgbb" if self.imgbb_api_key else "s3" if self.image_public_url else ""
 
     @property
     def inbox(self) -> Path:
@@ -118,8 +130,9 @@ class Config:
         return Path(self.data_dir) / "books.csv"
 
     @property
-    def sets_path(self) -> Path:
-        return Path(self.data_dir) / "sets.csv"
+    def products_path(self) -> Path:
+        """What you sell, one row per product (a set of books, or later a single book)."""
+        return Path(self.data_dir) / "products.csv"
 
     @property
     def listings_path(self) -> Path:
@@ -135,16 +148,37 @@ class Config:
         return self.shopee_dir / "import"
 
     @property
+    def template_dir(self) -> Path:
+        """Put Shopee's bulk-upload template here, as downloaded (any file name)."""
+        return self.shopee_dir / "template"
+
+    @property
     def template_path(self) -> Path:
-        return Path(self.shopee_template) if self.shopee_template else self.shopee_dir / "template.xlsx"
+        """Where the template is looked for: SHOPEE_TEMPLATE (a file or a folder), else the template folder."""
+        return Path(self.shopee_template) if self.shopee_template else self.template_dir
+
+    @property
+    def uploads_dir(self) -> Path:
+        """The upload files made for Shopee (shopee_upload_<date-time>.xlsx)."""
+        return self.shopee_dir / "uploads"
+
+    @property
+    def photos_dir(self) -> Path:
+        """Each product's photos for the listing: <product code>/01.jpg ..."""
+        return self.listings_dir / "photos"
 
     @property
     def cache_dir(self) -> Path:
         return Path(self.data_dir) / "cache"
 
-    def ensure_dirs(self) -> None:
-        for d in (self.inbox, self.processed, self.review, self.listings_dir, self.shopee_import):
+    def ensure_dirs(self) -> list:
+        """Every data folder, made if missing (so there is nothing to create by hand), and files from older versions
+        brought up to date. Returns what was moved / renamed, to show."""
+        from .store import migrate_old_files
+        for d in (self.inbox, self.processed, self.review, self.listings_dir, self.photos_dir, self.shopee_import,
+                  self.template_dir, self.uploads_dir, self.cache_dir):
             d.mkdir(parents=True, exist_ok=True)
+        return migrate_old_files(self.data_dir)
 
     def apply_decode_settings(self) -> None:
         from ..photos import decode
@@ -203,7 +237,6 @@ class Config:
             settle_seconds=int(e("SETTLE_SECONDS", "5")),
             bot_timeout=float(e("BOT_TIMEOUT", "30") or 30),
             set_discount=_ratio(e("SET_DISCOUNT", "20%") or "0"),
-            set_weight_per_book_g=int(float(e("SET_WEIGHT_PER_BOOK_G", "300") or 300)),
             shopee_template=e("SHOPEE_TEMPLATE", "").strip(),
             shopee_category_id=e("SHOPEE_CATEGORY_ID", "").strip(),
             shopee_category_name=e("SHOPEE_CATEGORY_NAME", "其他書籍").strip(),
@@ -212,12 +245,16 @@ class Config:
             shopee_max_images=max(2, int(e("SHOPEE_MAX_IMAGES", "9") or 9)),
             shopee_shop_id=e("SHOPEE_SHOP_ID", "").strip(),
             shopee_export_password=e("SHOPEE_EXPORT_PASSWORD", "").strip(),
+            photo_host=e("PHOTO_HOST", "").strip().lower(),
+            imgbb_api_key=e("IMGBB_API_KEY", "").strip(),
             image_public_url=e("IMAGE_PUBLIC_URL", "").strip().rstrip("/"),
             s3_endpoint_url=e("S3_ENDPOINT_URL", "").strip(),
             s3_bucket=e("S3_BUCKET", "").strip(),
             s3_access_key_id=e("S3_ACCESS_KEY_ID", "").strip(),
             s3_secret_access_key=e("S3_SECRET_ACCESS_KEY", "").strip(),
         )
+        if cfg.photo_host not in ("", "imgbb", "s3", "none"):
+            raise SystemExit(f"PHOTO_HOST in .env: '{cfg.photo_host}' - use imgbb, s3 or none (or leave it blank)")
         unknown = [p for p in cfg.providers + cfg.providers_tw if p not in ALL_PROVIDERS]
         if unknown:
             raise SystemExit(f"Unknown book provider(s) in .env: {', '.join(unknown)}. Known: {', '.join(ALL_PROVIDERS)}")

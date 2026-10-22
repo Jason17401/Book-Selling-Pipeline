@@ -1,5 +1,6 @@
-"""One marketplace post per set: the numbered front photo (+ optionally each back photo) and a text listing every book
-by its number. Made only for sets where every book is 'validated'."""
+"""Products: what you sell as one thing - a set of books (the books of one set photo, sold together) or, later, a
+single book - kept in data/products.csv, the same whatever platform it is sold on (each platform's copy of it is a row
+in data/listings.csv, made by pipeline/apps/shopee.py). Also the older one-folder-per-set listing (`listings`)."""
 from __future__ import annotations
 
 import json
@@ -148,13 +149,15 @@ def build_set_listings(rows: list, cfg: Config, grid=None, set_price=None, set_c
 
 
 # =================================================================================================
-# Sets as things you sell: data/sets.csv (one row per set, the same on every platform).
-# A set is the books with the same batch + set_id; its code is "<batch>-<set_id>" (e.g. 20261008-153012-S01), which is
-# also how every book's sku starts (20261008-153012-S01-03 = book 3 of that set). The code goes into the Shopee title,
-# the parent SKU (主商品貨號) and the first photo, so a Shopee order can always be traced back to its books.
+# Products: data/products.csv (one row per product, the same on every platform).
+# kind "set": the books with the same batch + set_id; its code is "<batch>-<set_id>" (e.g. 20261008-153012-S01), which
+# is also how every book's sku starts (20261008-153012-S01-03 = book 3 of that set). kind "book" (later): one book,
+# its code = its sku. The code goes into the Shopee title, the parent SKU (主商品貨號) and the first photo, so a Shopee
+# order can always be traced back to its books.
 # =================================================================================================
-SET_STATUSES = ("draft", "ready", "listed", "reserved", "sold", "withdrawn")
-SET_STATUS_HELP = {
+KINDS = ("set", "book")
+PRODUCT_STATUSES = ("draft", "ready", "listed", "reserved", "sold", "withdrawn")
+PRODUCT_STATUS_HELP = {
     "draft": "not ready: a book is not checked yet, or something else is missing (see errors)",
     "ready": "every book checked - the next `python -m pipeline shopee` puts it in the upload file",
     "listed": "in a Shopee upload file / on Shopee (or another platform)",
@@ -162,21 +165,34 @@ SET_STATUS_HELP = {
     "sold": "sold (order completed)",
     "withdrawn": "you took it off sale",
 }
-MANUAL_STATUSES = ("ready", "listed", "sold", "withdrawn")      # what you may set by hand (set-status / set view)
+MANUAL_STATUSES = ("ready", "listed", "sold", "withdrawn")      # what you may set by hand (product-status / Sell)
 ACTIVE_LISTING = ("exported", "live")                          # a listing that is (about to be) on sale
-AUTO_FIELDS = ("set_title", "discount", "set_price", "description", "weight_g")
+AUTO_FIELDS = ("title", "discount", "price", "description")
+QUANTITY_FIELDS = ("stock", "min_purchase")       # how many you have (庫存) / the fewest a buyer may order (最低購買數量)
+MAX_QUANTITY = 999_999                            # Shopee's limit for both
+# no weight or parcel size: we do not have them, and Shopee does not need them (選填 / optional in its template)
 # discount and set_price go together: type one, the other follows (the one you typed last is kept in `custom`)
 FOOTER_DEFAULT = ("・整套出售，恕不拆賣。\n"
                   "・皆為二手書，書況如各書所註，以照片為準。\n"
                   "・照片皆為實物拍攝。")
+BOOK_FOOTER_DEFAULT = ("・二手書，書況如上所註，以照片為準。\n"
+                       "・照片皆為實物拍攝。")
+SELL_MODES = {"": "set", "book": "book"}          # books.csv sell_as -> the kind of product the set's books become
+ON_SALE = ("listed", "reserved", "sold")          # a product in one of these can't be turned into another kind
 
 
-def set_code(batch: str, set_id: str) -> str:
+def sell_mode(books: list) -> str:
+    """How a set is sold: "set" (one product, the default) or "book" (each book its own product)."""
+    return "book" if any((b.get("sell_as") or "") == "book" for b in books) else "set"
+
+
+def code_for(batch: str, set_id: str) -> str:
+    """The product code of a set."""
     return f"{batch}-{set_id}"
 
 
 def code_of(book: dict) -> str:
-    return set_code(book.get("batch", ""), book.get("set_id", "")) if book.get("set_id") else ""
+    return code_for(book.get("batch", ""), book.get("set_id", "")) if book.get("set_id") else ""
 
 
 def now_text() -> str:
@@ -184,28 +200,10 @@ def now_text() -> str:
     return time.strftime("%Y-%m-%d %H:%M:%S")
 
 
-def short_title(title: str) -> str:
-    """The main title without its subtitle: 'Google必修的圖表簡報術：Google總監首度公開...' -> 'Google必修的圖表簡報術'."""
-    import re
-    t = re.split(r"[：:（(／/]| - ", title or "", maxsplit=1)[0].strip()
-    return t or (title or "").strip()
-
-
 def set_title_zh(code: str, books: list, limit: int = 60) -> str:
-    """【code】title1、title2 等｜二手書8本合售 - as many titles as fit in `limit` characters."""
-    head, tail = f"【{code}】", f"｜二手書{len(books)}本合售"
-    names = [short_title(b.get("title", "")) for b in books if b.get("title")]
-    room = limit - len(head) - len(tail)
-    shown = ""
-    for i, n in enumerate(names):
-        more = "、".join(names[: i + 1])
-        rest = "等" if i + 1 < len(names) else ""
-        if len(more + rest) > room:
-            break
-        shown = more + rest
-    if not shown and names:                      # not even the first title fits: cut it
-        shown = names[0][: max(1, room - 1)] + ("等" if len(names) > 1 else "")
-    return (head + shown + tail)[:limit]
+    """The automatic listing title: 【code】二手書8本一套 ("set of 8 second-hand books"). Change it per product in
+    Sell products. Shopee wants 10 to 60 characters."""
+    return f"【{code}】二手書{len(books)}本一套"[:limit]
 
 
 def ntd(v) -> str:
@@ -266,17 +264,69 @@ def set_problems(books: list, cfg: Config) -> list:
     return out
 
 
-def footer_text(cfg: Config) -> str:
-    """The lines at the end of every set's description: data/listings/description_footer.txt (made on first use, edit
-    it freely)."""
-    p = cfg.listings_dir / "description_footer.txt"
+def footer_text(cfg: Config, kind: str = "set") -> str:
+    """The lines at the end of every description: data/listings/description_footer.txt for sets,
+    description_footer_book.txt for single books (made on first use, edit them freely)."""
+    name, default = (("description_footer_book.txt", BOOK_FOOTER_DEFAULT) if kind == "book"
+                     else ("description_footer.txt", FOOTER_DEFAULT))
+    p = cfg.listings_dir / name
     try:
         if not p.exists():
             p.parent.mkdir(parents=True, exist_ok=True)
-            p.write_text(FOOTER_DEFAULT + "\n", encoding="utf-8")
+            p.write_text(default + "\n", encoding="utf-8")
         return p.read_text(encoding="utf-8-sig").strip()
     except OSError:
-        return FOOTER_DEFAULT
+        return default
+
+
+# ---- a single book as its own product (its set is sold per book) --------------------------------------------
+def book_title_zh(b: dict, limit: int = 60) -> str:
+    """The book's title. Shopee wants at least 10 characters: a short title gets its author, then （二手書）."""
+    t = (b.get("title") or "").strip() or "二手書"
+    if len(t) < 10 and (b.get("author") or "").strip():
+        t += f"｜{b['author'].strip()}"
+    if len(t) < 10:
+        t += "（二手書）"
+    if len(t) < 10:
+        t += "二手書籍出售"
+    return t[:limit]
+
+
+def book_description_zh(b: dict, cfg: Config, price=None, footer: str = "", limit: int = 3000) -> str:
+    """What buyers read for one book: its details (no numbering - it is the only book), its price, the photos."""
+    lines = [b.get("title") or ""]
+    for label, key in (("作者", "author"), ("出版社", "publisher"), ("出版年", "year"), ("頁數", "pages"),
+                       ("分類", "genre"), ("ISBN", "isbn13")):
+        if (b.get(key) or "").strip():
+            lines.append(f"{label}：{b[key].strip()}")
+    cond = COND_LABEL.get(b.get("condition"), b.get("condition") or "")
+    if cond:
+        lines.append(f"書況：{cond}")
+    if price is not None:
+        p = f"售價：{ntd(price)}"
+        if cfg.listing_show_market and b.get("market_price") and (b.get("market_currency") or "") == "TWD":
+            p += f"（新書定價 {ntd(b['market_price'])}）"
+        lines.append(p)
+    lines += ["", "照片 1：封面　照片 2：封底"]
+    if footer:
+        lines += ["──────────", footer]
+    text = "\n".join(lines)
+    return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
+def book_problems(b: dict, cfg: Config) -> list:
+    """Why this book can't go on sale on its own yet (empty list = it can)."""
+    out = []
+    if b.get("status") not in ("validated", "listed", "sold"):
+        out.append("not checked yet (review window)")
+    if b.get("price") and (b.get("currency") or "").upper() != "TWD":
+        out.append(f"not priced in TWD ({b.get('currency') or 'no currency'}) - Shopee sells in NT$: change the "
+                   "price in the review window")
+    if not (b.get("front_photo") or b.get("set_photo")):
+        out.append("no front photo")
+    if not b.get("back_photo"):
+        out.append("no back photo")
+    return out
 
 
 def set_description_zh(code: str, books: list, cfg: Config, price=None, total=None, footer: str = "",
@@ -318,19 +368,23 @@ def set_description_zh(code: str, books: list, cfg: Config, price=None, total=No
 
 
 def _set_from_books(s: dict, books: list, cfg: Config) -> None:
-    """Fill a set's automatic fields from its books (fields you edited - listed in `custom` - are kept)."""
-    custom = set(filter(None, (s.get("custom") or "").split(",")))
-    code = s["set_code"]
+    """Fill a product's automatic fields from its books - a set, or (kind "book") one book on its own. Fields you
+    edited - listed in `custom` - are kept."""
+    custom = set(filter(None, (s.get("custom") or "").split(","))) & set(AUTO_FIELDS)
+    s["custom"] = ",".join(sorted(custom))         # (older files may still name weight_g: no longer used)
+    code = s["product_code"]
+    single = s.get("kind") == "book"
+    usual = 0.0 if single else cfg.set_discount * 100     # the whole-set discount is for sets; a book: its own price
     if "discount" not in custom:
-        s["discount"] = f"{cfg.set_discount * 100:g}"
+        s["discount"] = f"{usual:g}"
     try:
         discount = pct(s["discount"])
     except ValueError:
-        discount = cfg.set_discount * 100
+        discount = usual
     price, total = set_price_of(books, discount)
-    if "set_price" in custom:                             # you typed the set's price: the discount follows from it
+    if "price" in custom:                             # you typed the set's price: the discount follows from it
         try:
-            price = max(1, int(round(float(s["set_price"]))))
+            price = max(1, int(round(float(s["price"]))))
             if total is not None:
                 discount = max(0.0, discount_for(price, total))   # dearer than the books: no discount
                 s["discount"] = f"{discount:g}"
@@ -340,20 +394,24 @@ def _set_from_books(s: dict, books: list, cfg: Config) -> None:
         except ValueError:
             pass
     s["original_price"] = f"{total:g}" if total is not None else ""
-    s["set_price"] = str(price) if price is not None else ""
-    auto = {"set_title": set_title_zh(code, books),
-            "description": set_description_zh(code, books, cfg, price, total, footer_text(cfg),
-                                              images=cfg.shopee_max_images, discount=discount),
-            "weight_g": str(cfg.set_weight_per_book_g * len(books))}
+    s["price"] = str(price) if price is not None else ""
+    if single:
+        auto = {"title": book_title_zh(books[0]),
+                "description": book_description_zh(books[0], cfg, price, footer_text(cfg, "book"))}
+    else:
+        auto = {"title": set_title_zh(code, books),
+                "description": set_description_zh(code, books, cfg, price, total, footer_text(cfg),
+                                                  images=cfg.shopee_max_images, discount=discount)}
     for k, v in auto.items():
         if k not in custom:
             s[k] = v
     s["currency"] = "TWD"
+    s["kind"] = "book" if single else "set"
     s["book_count"] = str(len(books))
 
 
-def apply_set_status(s: dict, status: str, books: list) -> bool:
-    """Set a set's status and make its books follow: listed/reserved -> books listed, sold -> books sold, back on the
+def apply_status(s: dict, status: str, books: list) -> bool:
+    """Set a product's status and make its books follow: listed/reserved -> books listed, sold -> books sold, back on the
     shelf (draft/ready/withdrawn) -> books validated again. Returns True if a book changed."""
     s["status"] = status
     want = {"listed": "listed", "reserved": "listed", "sold": "sold"}.get(status)
@@ -366,103 +424,166 @@ def apply_set_status(s: dict, status: str, books: list) -> bool:
     return changed
 
 
-def _new_set(code: str, books: list) -> dict:
-    """A set seen for the first time. Books you had already marked listed / sold by hand keep that."""
+def _new_product(code: str, books: list, kind: str = "set") -> dict:
+    """A product seen for the first time. Books you had already marked listed / sold by hand keep that."""
     sts = {b.get("status") for b in books}
     status = "sold" if sts == {"sold"} else "listed" if sts & {"listed", "sold"} else "draft"
-    return {"set_code": code, "status": status, "created_at": now_text(), "custom": ""}
+    return {"product_code": code, "kind": kind, "status": status, "created_at": now_text(), "custom": ""}
 
 
-def refresh_sets(cfg: Config) -> list:
-    """Bring data/sets.csv up to date with data/books.csv: a row for every set, its title / price / description /
-    weight worked out from its books (while it is draft or ready), and draft <-> ready from whether every book is
-    checked. Returns the sets."""
-    with store.locked(cfg.csv_path), store.locked(cfg.sets_path):
+def _products_of_set(code: str, group: list, mode: str) -> list:
+    """(product code, kind, its books) for every product a set becomes: the set itself, or each of its books."""
+    if mode == "book":
+        return [(b["sku"], "book", [b]) for b in group]
+    return [(code, "set", group)]
+
+
+def refresh_products(cfg: Config) -> list:
+    """Bring data/products.csv up to date with data/books.csv: a product for every set, its title / price / description
+    worked out from its books (while it is draft or ready), and draft <-> ready from whether every book is
+    checked. Returns the products."""
+    store.migrate_old_files(cfg.data_dir)              # data/sets.csv of older versions -> data/products.csv
+    with store.locked(cfg.csv_path), store.locked(cfg.products_path):
         books = store.read_rows(cfg.csv_path)
-        sets = store.read_table(cfg.sets_path)
-        by_code = {s["set_code"]: s for s in sets}
+        sets = store.read_table(cfg.products_path)
+        by_code = {s["product_code"]: s for s in sets}
         books_changed = False
+        gone = set()
         for (batch, set_id), group in set_groups(books).items():
-            code = set_code(batch, set_id)
-            s = by_code.get(code)
-            if s is None:
-                s = by_code[code] = _new_set(code, group)
-                sets.append(s)
-            before = dict(s)
-            if s["status"] in ("draft", "ready"):
-                _set_from_books(s, group, cfg)
-                problems = set_problems(group, cfg)
-                s["errors"] = "; ".join(problems)
-                s["status"] = "draft" if problems else "ready"
-            elif not s.get("set_title"):
-                _set_from_books(s, group, cfg)          # e.g. marked listed by hand before sets existed
-            books_changed |= apply_set_status(s, s["status"], group)
-            if s != before:
-                s["updated_at"] = now_text()
-        sets.sort(key=lambda s: s["set_code"])
-        store.write_table(cfg.sets_path, sets, store.SET_COLUMNS)
+            code = code_for(batch, set_id)
+            mode = sell_mode(group)
+            wanted = _products_of_set(code, group, mode)
+            # the products of the other way of selling this set: never on sale (switching is refused then) - dropped
+            other = [code] if mode == "book" else [b["sku"] for b in group]
+            for c in other:
+                if c in by_code and by_code[c]["status"] not in ON_SALE:
+                    gone.add(c)
+            for pcode, kind, its_books in wanted:
+                s = by_code.get(pcode)
+                if s is None:
+                    s = by_code[pcode] = _new_product(pcode, its_books, kind)
+                    sets.append(s)
+                before = dict(s)
+                s["kind"] = kind
+                if s["status"] in ("draft", "ready"):
+                    _set_from_books(s, its_books, cfg)
+                    problems = (book_problems(its_books[0], cfg) if kind == "book"
+                                else set_problems(its_books, cfg))
+                    s["errors"] = "; ".join(problems)
+                    s["status"] = "draft" if problems else "ready"
+                elif not s.get("title"):
+                    _set_from_books(s, its_books, cfg)      # e.g. marked listed by hand before products existed
+                for k in QUANTITY_FIELDS:                  # 1 unless you changed it
+                    s[k] = s.get(k) or "1"
+                books_changed |= apply_status(s, s["status"], its_books)
+                if s != before:
+                    s["updated_at"] = now_text()
+        sets = [s for s in sets if s["product_code"] not in gone]
+        sets.sort(key=lambda s: s["product_code"])
+        store.write_table(cfg.products_path, sets, store.PRODUCT_COLUMNS)
         if books_changed:
             store.write_rows(cfg.csv_path, books)
         return sets
 
 
 def books_of(cfg: Config, code: str, books: list = None) -> list:
+    """The books of a product: all the books of a set, or the one book whose sku is the code."""
     books = store.read_rows(cfg.csv_path) if books is None else books
-    return sorted((b for b in books if code_of(b) == code), key=lambda b: int(b.get("position") or 0))
+    return sorted((b for b in books if code_of(b) == code or b.get("sku") == code),
+                  key=lambda b: int(b.get("position") or 0))
 
 
-def change_set_status(cfg: Config, code: str, status: str, note: str = "") -> list:
-    """You change a set's status by hand (set-status command / set view): e.g. sold at a market -> sold; you deleted
+def set_sell_mode(cfg: Config, batch: str, set_id: str, mode: str) -> list:
+    """Sell a set as ONE product ("set") or each of its books as its own product ("book"). Refused while a product of
+    the current way is on Shopee / ordered / sold (take it off sale first). Returns the set's products now."""
+    if mode not in ("set", "book"):
+        raise ValueError("mode must be set or book")
+    code = code_for(batch, set_id)
+    with store.locked(cfg.csv_path), store.locked(cfg.products_path):
+        books = store.read_rows(cfg.csv_path)
+        group = [b for b in books if b.get("batch") == batch and b.get("set_id") == set_id]
+        if not group:
+            raise KeyError(f"set {code} not found")
+        mine = {code} | {b["sku"] for b in group}
+        if sell_mode(group) == mode:
+            return [p for p in refresh_products(cfg) if p["product_code"] in mine]
+        current = [code] if mode == "book" else [b["sku"] for b in group]
+        busy = [p["product_code"] for p in store.read_table(cfg.products_path)
+                if p["product_code"] in current and p["status"] in ON_SALE]
+        if busy:
+            what = "the set is" if mode == "book" else f"book(s) {', '.join(busy)} are"
+            raise ValueError(f"Can't change how set {set_id} is sold: {what} listed, ordered or sold. Take it off "
+                             "sale first (status Withdrawn in Sell products), then change it.")
+        for b in group:
+            b["sell_as"] = "" if mode == "set" else "book"
+        store.write_rows(cfg.csv_path, books)
+        return [p for p in refresh_products(cfg) if p["product_code"] in mine]
+
+
+def change_product_status(cfg: Config, code: str, status: str, note: str = "") -> list:
+    """You change a product's status by hand (product-status command / Sell window): e.g. sold at a market -> sold; you deleted
     the Shopee product -> ready (or withdrawn). Returns messages, e.g. listings on other platforms to take down."""
     if status not in MANUAL_STATUSES:
         raise ValueError(f"status must be one of: {', '.join(MANUAL_STATUSES)}")
     msgs = []
-    with store.locked(cfg.csv_path), store.locked(cfg.sets_path), store.locked(cfg.listings_path):
+    with store.locked(cfg.csv_path), store.locked(cfg.products_path), store.locked(cfg.listings_path):
         books = store.read_rows(cfg.csv_path)
-        sets = store.read_table(cfg.sets_path)
+        sets = store.read_table(cfg.products_path)
         listings = store.read_table(cfg.listings_path)
-        s = next((x for x in sets if x["set_code"] == code), None)
+        s = next((x for x in sets if x["product_code"] == code), None)
         if s is None:
-            raise KeyError(f"set {code} not found - run python -m pipeline shopee (or status) first")
+            raise KeyError(f"product {code} not found - run python -m pipeline shopee (or status) first")
         group = books_of(cfg, code, books)
-        if status == "ready" and set_problems(group, cfg):
+        problems = book_problems(group[0], cfg) if s.get("kind") == "book" and group else set_problems(group, cfg)
+        if status == "ready" and problems:
             status = "draft"
-        apply_set_status(s, status, group)
+        apply_status(s, status, group)
         s["updated_at"] = now_text()
         if note:
             s["notes"] = "; ".join(x for x in (s.get("notes"), note) if x)
         if status == "sold":
             s["sold_on"] = s.get("sold_on") or "manual"
             s["sold_at"] = s.get("sold_at") or now_text()
-            s["sold_price"] = s.get("sold_price") or s.get("set_price", "")
+            s["sold_price"] = s.get("sold_price") or s.get("price", "")
         if status in ("ready", "draft", "withdrawn", "sold"):
             for li in listings:
-                if li["set_code"] == code and li.get("status") in ACTIVE_LISTING:
+                if li["product_code"] == code and li.get("status") in ACTIVE_LISTING:
                     if status == "sold":
                         msgs.append(f"{code} is sold: take it down on {li['platform']}"
                                     + (f" ({li['url']})" if li.get("url") else ""))
                     li["status"], li["delisted_at"] = "delisted", now_text()
         store.write_rows(cfg.csv_path, books)
-        store.write_table(cfg.sets_path, sets, store.SET_COLUMNS)
+        store.write_table(cfg.products_path, sets, store.PRODUCT_COLUMNS)
         store.write_table(cfg.listings_path, listings, store.LISTING_COLUMNS)
     return msgs
 
 
-def save_set_fields(cfg: Config, code: str, fields: dict) -> dict:
-    """You edited a set's title / discount or price / description / weight: saved, and remembered as yours (`custom`)
+def save_product_fields(cfg: Config, code: str, fields: dict) -> dict:
+    """You edited a product's title / discount or price / description / stock / minimum purchase quantity: saved, and
+    the text fields remembered as yours (`custom`)
     so the automatic value no longer replaces it. An empty value goes back to automatic. Discount and set price go
     together: give the discount and the price follows (sum of the books' prices minus it), or give the price and the
     discount follows."""
     def change(sets):
-        s = next((x for x in sets if x["set_code"] == code), None)
+        s = next((x for x in sets if x["product_code"] == code), None)
         if s is None:
-            raise KeyError(f"set {code} not found")
+            raise KeyError(f"product {code} not found")
         custom = set(filter(None, (s.get("custom") or "").split(",")))
         for k, v in fields.items():
-            if k not in AUTO_FIELDS + ("notes",):
+            if k not in AUTO_FIELDS + QUANTITY_FIELDS + ("notes",):
                 continue
             v = ("" if v is None else str(v)).strip()
-            if k in ("weight_g", "set_price") and v:
+            if k in QUANTITY_FIELDS:                          # a whole number from 1 to 999,999; empty = 1
+                what = "Stock" if k == "stock" else "Minimum purchase quantity"
+                try:
+                    n = int(v.replace(",", "") or "1")
+                except ValueError:
+                    raise ValueError(f"{what} must be a whole number (1 to {MAX_QUANTITY:,})")
+                if not 1 <= n <= MAX_QUANTITY:
+                    raise ValueError(f"{what} must be from 1 to {MAX_QUANTITY:,}")
+                s[k] = str(n)
+                continue
+            if k == "price" and v:
                 v = v.replace(",", "").replace("NT$", "").replace("$", "")
                 if float(v) <= 0:                             # ValueError -> shown to you, nothing saved
                     raise ValueError("The price must be more than 0")
@@ -471,21 +592,23 @@ def save_set_fields(cfg: Config, code: str, fields: dict) -> dict:
                 if not 0 <= d < 100:
                     raise ValueError("The discount must be from 0 to 99 (%)")
                 v = f"{d:g}"
-            if (s.get(k) or "") == v and k not in ("discount", "set_price"):
+            if (s.get(k) or "") == v and k not in ("discount", "price"):
                 continue
             s[k] = v
             if k != "notes":
                 (custom.add if v else custom.discard)(k)
-            if k in ("discount", "set_price"):                # the one typed last decides; the other follows
-                custom.discard("set_price" if k == "discount" else "discount")
+            if k in ("discount", "price"):                # the one typed last decides; the other follows
+                custom.discard("price" if k == "discount" else "discount")
+        if int(s.get("min_purchase") or 1) > int(s.get("stock") or 1):
+            raise ValueError("The minimum purchase quantity can't be more than the stock - buyers could not order it")
         s["custom"] = ",".join(sorted(custom))
         s["updated_at"] = now_text()
         return dict(s)
-    store.update_table(cfg.sets_path, store.SET_COLUMNS, change)
-    return next(s for s in refresh_sets(cfg) if s["set_code"] == code)
+    store.update_table(cfg.products_path, store.PRODUCT_COLUMNS, change)
+    return next(s for s in refresh_products(cfg) if s["product_code"] == code)
 
 
-# ---- the photos of a set listing (9 at most on Shopee) -------------------------------------------
+# ---- the photos of a set product (9 at most on Shopee) -------------------------------------------
 def _square(img: Image.Image, size: int) -> Image.Image:
     img = img.copy()
     img.thumbnail((size, size))
@@ -548,3 +671,33 @@ def make_set_images(code: str, books: list, cfg: Config, dst: Path, max_images: 
         _save_small(canvas, p)
         paths.append(p)
     return paths
+
+
+def make_book_images(book: dict, cfg: Config, dst: Path, size: int = 1500) -> list:
+    """A single book's photos, square, in dst: 01.jpg its front (its own cover, cut out of the set photo - the cover
+    image) and 02.jpg its back photo. Returns the paths."""
+    from ..photos.decode import load_image
+    from ..photos.grid import book_cover
+    dst.mkdir(parents=True, exist_ok=True)
+    for old in dst.glob("*.jpg"):
+        old.unlink()
+    set_photo = book.get("set_photo") or book.get("front_photo")
+    own = book.get("front_photo")
+    needs_set = not (own and own != set_photo and Path(own).exists())      # no cut-out: its cell of the set photo
+    front = load_image(set_photo) if needs_set and set_photo else None
+    paths = []
+    for name, im in (("01.jpg", book_cover(book, front, cfg.grid, cfg.region)),
+                     ("02.jpg", load_image(book["back_photo"]) if book.get("back_photo") else None)):
+        if im is None:
+            continue
+        p = dst / name
+        _save_small(_square(im.convert("RGB"), size), p)
+        paths.append(p)
+    return paths
+
+
+def make_product_images(product: dict, books: list, cfg: Config, dst: Path) -> list:
+    """The listing photos of a product: a set's numbered photos, or a single book's front + back."""
+    if product.get("kind") == "book":
+        return make_book_images(books[0], cfg, dst)
+    return make_set_images(product["product_code"], books, cfg, dst, cfg.shopee_max_images)
