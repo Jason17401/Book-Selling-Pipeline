@@ -29,15 +29,15 @@
     <rect x="60" y="130" width="320" height="94" rx="10" fill="#ffffff" stroke="#93c5fd"/>
     <circle cx="84" cy="154" r="13" fill="#2563eb"/><text x="84" y="159" class="step" text-anchor="middle">1</text>
     <text x="106" y="160" class="title">Photograph a set</text>
-    <text x="78" y="186" class="body">1 photo of all front covers (2 x 5 grid)</text>
+    <text x="78" y="186" class="body">1 photo of all front covers (2 x 4 grid)</text>
     <text x="78" y="206" class="body">+ 1 barcode photo per book, in order</text>
   </g>
   <g>
     <rect x="440" y="130" width="320" height="94" rx="10" fill="#ffffff" stroke="#93c5fd"/>
     <circle cx="464" cy="154" r="13" fill="#2563eb"/><text x="464" y="159" class="step" text-anchor="middle">2</text>
     <text x="486" y="160" class="title">Send to the Telegram bot</text>
-    <text x="458" y="186" class="body">front photo first, then the 10 barcodes</text>
-    <text x="458" y="206" class="body">bot replies "Set 1: barcode 4/10 saved"</text>
+    <text x="458" y="186" class="body">front photo first, then the 8 barcodes</text>
+    <text x="458" y="206" class="body">bot replies "Set 1: barcode 4/8 saved"</text>
   </g>
   <g>
     <rect x="820" y="130" width="320" height="94" rx="10" fill="#ffffff" stroke="#93c5fd"/>

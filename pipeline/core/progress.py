@@ -126,10 +126,10 @@ LABEL = {"barcodes": "barcodes", "book": "book lookup", "market": "market price"
 
 class TerminalDisplay:
     """Per book:
-        Book 3/10  S01 #3  ISBN 9789866920738
+        Book 3/8  S01 #3  ISBN 9789866920738
           book lookup   ✓ eslite: Google必修的圖表簡報術 - 許郁文 (旗標 2016)
           market price  … books.com.tw q=9789866920738 (isbn): no products      <- rewritten in place, then kept
-        [██████░░░░░░░░░░░░░░]  2/10 books  20%                                  <- always the bottom line
+        [██████░░░░░░░░░░░░░░]  2/8 books  25%                                  <- always the bottom line
     Without a terminal (output redirected to a file) it prints only the kept lines."""
 
     def __init__(self, stream=None, ansi=None, columns=None):
@@ -252,7 +252,7 @@ def terminal(stream=None):
 class ChatProgress:
     """The progress message in the chat while /process runs, e.g.
 
-        Processing  ▓▓▓▓▓▓░░░░░░░░░░  4/10 books (40%)
+        Processing  ▓▓▓▓▓▓░░░░░░░░░░  4/8 books (50%)
         Book 5 (S01 #5): market price - eslite: searching
 
     It is ONE message, edited as the work goes on (at most every EDIT_EVERY seconds - Telegram limits how often a

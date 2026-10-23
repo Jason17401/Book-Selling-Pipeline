@@ -34,7 +34,7 @@ from ..core.isbn import normalize
 
 log = logging.getLogger("pipeline.market")
 MARKET_FIELDS = ("market_price", "market_currency", "market_source", "market_url", "market_match", "market_isbn")
-VERSION = 9   # bump to ignore old cached answers
+VERSION = 10  # bump to ignore old cached answers (10: web search by the plain ISBN on every shop first)
 
 
 def _main_title(title: str) -> str:
@@ -413,8 +413,14 @@ class Hunt:
             log.info("  %s: none of the %d result(s) checked is this ISBN", how, k)
         return {}
 
+    def web_isbn_all(self) -> dict:
+        """The ISBN alone, on every shop at once - like "9789574760190 (site:eslite.com OR site:books.com.tw)"."""
+        sites = [SHOP_SITES[s] for s in self.cfg.market_providers if s in SHOP_SITES]
+        return self.web_results(websearch.search_query(self.isbn, sites, self.cfg, errors=self.errors), "web search")
+
     def web_isbn(self, shop: str) -> dict:
-        return self.web_results(websearch.searches(self.isbn, SHOP_SITES[shop], self.cfg), "web search")
+        return self.web_results(websearch.searches(self.isbn, SHOP_SITES[shop], self.cfg, errors=self.errors),
+                                "web search")
 
     def web_title(self) -> dict:
         t = search_title(self.title)
@@ -423,7 +429,8 @@ class Hunt:
         names = author_names(self.author)
         query = f"{t} {names[0]}" if names else t
         sites = [SHOP_SITES[s] for s in self.cfg.market_providers if s in SHOP_SITES]
-        return self.web_results(websearch.search_query(query, sites, self.cfg), "web search, title")
+        return self.web_results(websearch.search_query(query, sites, self.cfg, errors=self.errors),
+                                "web search, title")
 
     # ---- the order -------------------------------------------------------------------------------
     def steps(self):
@@ -439,6 +446,8 @@ class Hunt:
                 if kind in kinds and q:
                     yield shop, (self.eslite_search if shop == "eslite" else self.books_search), (q, kind)
         if web:
+            if "isbn" in cfg.web_queries and shops:
+                yield "web", self.web_isbn_all, ()
             for shop in shops:
                 yield "web", self.web_isbn, (shop,)
         if "title" in kinds and search_title(self.title):
@@ -579,14 +588,43 @@ def find_market_price(isbn: str, title: str, cfg: Config, use_cache: bool = True
         if hit is not None:
             return hit
     hunt = Hunt(isbn, title, author, cfg)
-    got = hunt.run()
+    trace = _Trace()
+    quiet = log.getEffectiveLevel() > logging.INFO     # nobody shows these lines: collect them, show none
+    old = (log.level, log.propagate)
+    if quiet:
+        log.setLevel(logging.INFO)
+        log.propagate = False
+    log.addHandler(trace)
+    try:
+        got = hunt.run()
+    finally:
+        log.removeHandler(trace)
+        if quiet:
+            log.setLevel(old[0])
+            log.propagate = old[1]
     if got:
         got.setdefault("market_match", "exact")
         cache.put(key, isbn, got)
         return got
-    if title and not hunt.errors:
+    # nothing found: what was tried, for checking (data/cache/debug/..._market_<isbn>.html)
+    net.save_debug(cfg.cache_dir, f"market_{isbn}", "\n".join(trace.lines + [f"ERROR {e}" for e in hunt.errors]))
+    if title and not hunt.errors:         # a real "not found" (every source answered): remembered for a while
         cache.put(key, isbn, {})
     return {"_errors": hunt.errors} if hunt.errors else {}
+
+
+class _Trace(logging.Handler):
+    """Collects the market search's log lines (every search tried and what it gave)."""
+
+    def __init__(self):
+        super().__init__(logging.DEBUG)
+        self.lines: list = []
+
+    def emit(self, record):
+        try:
+            self.lines.append(record.getMessage())
+        except Exception:
+            pass
 
 
 # ---- your price -----------------------------------------------------------------------------------

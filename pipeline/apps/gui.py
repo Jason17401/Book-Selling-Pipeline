@@ -820,9 +820,10 @@ class BookEditor(QWidget):
     def _condition_box(empty_label: str) -> QComboBox:
         box = flat_combo(QComboBox())
         box.addItem(empty_label, "")
-        for code, zh, en, meaning in CONDITION_GRADES:
+        for code, zh, en, grade, meaning, meaning_zh in CONDITION_GRADES:
             box.addItem(f"{zh}  {en}", code)
-            box.setItemData(box.count() - 1, meaning, Qt.ItemDataRole.ToolTipRole)
+            box.setItemData(box.count() - 1, f"TAAZE grade {grade}: {meaning}\n{meaning_zh}",
+                            Qt.ItemDataRole.ToolTipRole)
         return box
 
     # -- showing a book --
@@ -1030,7 +1031,8 @@ class BookEditor(QWidget):
             self.find_btn.setText("Find")
             self.message.setText(f"Market price look up failed: {msg}")
         author = self.fields["author"].text().strip() if "author" in self.fields else ""
-        run_in_background(editing.market_for, self.cfg, isbn, title, True, author, on_done=done, on_fail=failed)
+        # you asked for it: search again now (a "not found" remembered from processing is not repeated)
+        run_in_background(editing.market_for, self.cfg, isbn, title, False, author, on_done=done, on_fail=failed)
 
     def search_web(self) -> None:
         from ..sources.websearch import browser_search_url

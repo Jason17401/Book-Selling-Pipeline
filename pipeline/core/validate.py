@@ -11,7 +11,7 @@ Status of a book (column `status` in books.csv):
   validated     Complete AND confirmed by you. When every book of a set is validated, the set is 'ready' to sell.
   listed        Its product (its set) is on sale (the product's status decides this - data/products.csv).
   sold          Its product is sold. The book checks here never change listed / sold books.
-Condition and price are REQUIRED (new books get DEFAULT_CONDITION, normally like_new, and a price worked out from the
+Condition and price are REQUIRED (new books get DEFAULT_CONDITION, normally as_new, and a price worked out from the
 market price when one is found). The market price is OPTIONAL: an empty one is fine, a filled-in one must be valid.
 """
 from __future__ import annotations
@@ -22,23 +22,24 @@ from pathlib import Path
 from .config import Config
 from .isbn import isbn13_valid
 
-# Book condition grades - TAAZE 讀冊生活's five used-book grades (全新 / 近全新 / 良好 / 普通 / 差強人意), the scale
-# Taiwanese used-book buyers know best. (code, Chinese name, English name, what it means)
+# Book condition grades - TAAZE 讀冊生活's five used-book grades A-E (書況標定), the scale Taiwanese used-book buyers
+# know best, with TAAZE's own definitions. The code (English) is what books.csv stores; listings show the Chinese name.
+# (code, Chinese name, English name, TAAZE grade, what it means - English, what it means - TAAZE's Chinese)
 CONDITION_GRADES = [
-    ("new", "全新", "New", "Unread. No marks, wear or yellowing; looks as it did in the shop."),
-    ("like_new", "近全新", "Like new", "Read carefully once or twice. No writing or highlighting; at most tiny shelf "
-                                        "wear on edges or corners."),
-    ("good", "良好", "Good", "Clearly read, but clean and complete: light wear on cover/corners or slight yellowing; "
-                             "no or very little writing."),
-    ("fair", "普通", "Fair", "Obvious wear: creases, yellowing, foxing (書斑), some writing or highlighting, a name "
-                             "on the first page. All pages present and readable."),
-    ("poor", "差強人意", "Poor", "Heavy wear: lots of writing, water marks, loose or damaged pages or cover. Readable "
-                                 "but priced as such."),
+    ("new", "全新", "New", "A", "Still in the supplier's original shrink wrap, unopened; no defects.",
+     "原供應商膠膜未拆，無瑕疵。"),
+    ("as_new", "近全新", "As new", "B", "Not shrink-wrapped; signs of reading barely noticeable - like a book on "
+                                         "display in a bookshop.", "未包膜，翻閱痕跡不明顯，如實體賣場陳列販售之書籍。"),
+    ("good", "良好", "Good", "C", "Signs of use, such as folded corners or knocks; not as clean and white as a new "
+                                  "book.", "有使用痕跡，如摺角、碰撞等，不如新書潔白。"),
+    ("fair", "普通", "Fair", "D", "Obvious signs of use, or yellowing / brown or black spots.",
+     "有明顯使用痕跡或黃褐色、黑斑等。"),
+    ("poor", "差強人意", "Poor", "E", "Faded or blurred printing, or worse.", "印刷褪色、模糊或其它更糟之書況。"),
 ]
 CONDITIONS = [c[0] for c in CONDITION_GRADES]             # best first
 CONDITION_ZH = {c[0]: c[1] for c in CONDITION_GRADES}
 CONDITION_EN = {c[0]: c[2] for c in CONDITION_GRADES}
-OLD_CONDITIONS = {"acceptable": "fair"}                   # names used by older versions
+OLD_CONDITIONS = {"acceptable": "fair", "like_new": "as_new"}       # codes used by older versions -> today's
 DONE = ("listed", "sold")
 STATUSES = ("needs_manual", "enriched", "to_check", "validated", "listed", "sold")
 
@@ -61,7 +62,7 @@ def row_issues(r: dict, cfg: Config) -> list:
             out.append({"field": f, "msg": f"{name} missing{hint}"})
     cond = OLD_CONDITIONS.get((r.get("condition") or "").strip(), (r.get("condition") or "").strip())
     if not cond:
-        out.append({"field": "condition", "msg": "Condition missing: pick one (近全新 like_new if nothing is wrong with it)"})
+        out.append({"field": "condition", "msg": "Condition missing: pick one (近全新 as new if it is hardly read)"})
     elif cond not in CONDITIONS:
         out.append({"field": "condition", "msg": f"Condition '{cond}' is not one of: {', '.join(CONDITIONS)}"})
     price = (r.get("price") or "").strip()

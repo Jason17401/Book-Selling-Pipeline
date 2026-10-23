@@ -164,7 +164,7 @@ def test_eslite_out_of_print_found_through_web_search(tmp_path, fake):  # noqa: 
     assert got["market_source"] == "eslite (web search) - out of print"
     assert got["market_url"] == "https://www.eslite.com/product/1001247312496322"
     web = [c for c in s.calls if "tavily" in c[1]]
-    assert len(web) == 1 and web[0][2]["json"]["query"] == f"{OOP} site:eslite.com"
+    assert len(web) == 1 and web[0][2]["json"]["query"] == OOP                      # the ISBN alone, on the shops
     assert web[0][2]["headers"]["Authorization"] == "Bearer TVKEY"
     assert net.DailyCounter(cfg.cache_dir / "quota.json", period="month").used("tavily") == 1
 
@@ -215,7 +215,7 @@ def test_tavily_free_web_search(tmp_path, fake):  # noqa: F811
     got = market.find_market_price(OOP, "Google必修的圖表簡報術", cfg)
     assert got["market_price"] == "420" and got["market_source"].startswith("eslite (web search)")
     method, url, kw = [c for c in s.calls if "tavily" in c[1]][0]
-    assert method == "POST" and kw["json"]["include_domains"] == ["eslite.com"] and kw["json"]["query"] == f"{OOP} site:eslite.com"
+    assert method == "POST" and kw["json"]["include_domains"] == ["eslite.com"] and kw["json"]["query"] == OOP
     assert kw["json"]["include_raw_content"] is True
     assert kw["headers"]["Authorization"] == "Bearer TVKEY" and "TVKEY" not in url
 
@@ -253,7 +253,7 @@ def test_langsearch_daily_free_web_search(tmp_path, fake):  # noqa: F811
     got = market.find_market_price(OOP, "T", cfg)
     assert got["market_price"] == "420"
     call = [c for c in s.calls if "langsearch" in c[1]][0]
-    assert call[2]["json"]["query"] == f"{OOP} site:eslite.com" and call[2]["headers"]["Authorization"] == "Bearer sk-L"
+    assert call[2]["json"]["query"] == OOP and call[2]["headers"]["Authorization"] == "Bearer sk-L"
 
 
 def test_web_step_runs_even_if_old_env_lacks_it_and_engines_fall_back(tmp_path, fake):  # noqa: F811
@@ -281,7 +281,7 @@ def test_the_same_search_is_never_repeated_on_another_engine(tmp_path, fake):  #
                   langsearch_api_key="L")
     market.find_market_price(OOP, "", cfg)
     queries = [c[2]["json"]["query"] for c in s.calls if "tavily" in c[1] or "langsearch" in c[1]]
-    assert queries == [f"{OOP} site:eslite.com", f"eslite {OOP}"]                 # each once, on tavily
+    assert queries == [OOP, f"{OOP} site:eslite.com", f"eslite {OOP}"]           # each once, on tavily
 
 
 def test_split_addon_without_space():
@@ -326,7 +326,7 @@ def test_price_in_text_needs_our_isbn():
 
 
 def test_old_eslite_links_and_second_query_form(tmp_path, fake):  # noqa: F811
-    """1st search's top results are other books -> 2nd form "eslite <isbn>" -> an OLD product.aspx?pgid= link."""
+    """1st search's top results are other books -> 2nd form "<isbn> site:eslite.com" -> an OLD product.aspx?pgid= link."""
     replies = iter([
         Resp(200, {"results": [{"url": "https://www.eslite.com/product/1001247312874726"}]}),
         Resp(200, {"results": [{"url": "https://www.eslite.com/product/1001247312874726"},   # already checked
@@ -338,7 +338,7 @@ def test_old_eslite_links_and_second_query_form(tmp_path, fake):  # noqa: F811
     got = market.find_market_price(OOP, "", cfg)
     assert got["market_price"] == "420" and got["market_url"] == "https://www.eslite.com/product/1001247312496322"
     queries = [c[2]["json"]["query"] for c in s.calls if "tavily" in c[1]]
-    assert queries == [f"{OOP} site:eslite.com", f"eslite {OOP}"]
+    assert queries == [OOP, f"{OOP} site:eslite.com"]
     assert sum("1001247312874726" in c[1] for c in s.calls) == 1                        # not opened twice
 
 
@@ -411,7 +411,7 @@ def test_title_steps_come_after_every_isbn_step_and_web_title_is_one_search(tmp_
 
     def tavily(method, url, kw):
         calls.append(kw["json"])
-        if len(calls) < 3:                                        # the two ISBN searches find nothing
+        if len(calls) < 4:                                        # the three ISBN searches find nothing
             return Resp(200, {"results": []})
         return Resp(200, {"results": [{"url": "https://www.eslite.com/product/1001000000000001"}]})
     fake({"athena.eslite.com/api/v2/search": Resp(200, {"hits": {"found": "0", "hit": []}}),
@@ -422,8 +422,8 @@ def test_title_steps_come_after_every_isbn_step_and_web_title_is_one_search(tmp_
     cfg = cfg_for(tmp_path, market_providers=("eslite",), tavily_api_key="T")
     got = market.find_market_price(isbn, "小王子", cfg, author="聖修伯里")
     assert got["market_match"] == "similar" and got["market_price"] == "260"
-    assert [c["query"] for c in calls] == [f"{isbn} site:eslite.com", f"eslite {isbn}", "小王子 聖修伯里"]
-    assert calls[2]["include_domains"] == ["eslite.com"]
+    assert [c["query"] for c in calls] == [isbn, f"{isbn} site:eslite.com", f"eslite {isbn}", "小王子 聖修伯里"]
+    assert calls[3]["include_domains"] == ["eslite.com"]
 
 
 def test_ncl_is_asked_before_spending_a_web_search(tmp_path, fake, monkeypatch):  # noqa: F811
@@ -475,7 +475,7 @@ def test_max_price_default_allows_twd():
     from pipeline.core.validate import row_issues
     cfg = Config()
     assert cfg.max_price == 500
-    r = {"isbn13": OOP, "title": "T", "author": "A", "condition": "like_new", "price": "450", "currency": "TWD",
+    r = {"isbn13": OOP, "title": "T", "author": "A", "condition": "as_new", "price": "450", "currency": "TWD",
          "back_photo": "x"}
     assert not [i for i in row_issues(r, cfg) if i["field"] == "price"]
 
@@ -504,3 +504,38 @@ def test_ncl_price_comes_before_the_shops(tmp_path, fake, monkeypatch):  # noqa:
     got = market.find_market_price(OOP, "Google必修的圖表簡報術", cfg)
     assert got["market_price"] == "250" and got["market_source"] == "ncl (registered price)"
     assert seen == ["Google必修的圖表簡報術"] and not s.calls             # no shop asked at all
+
+
+def test_this_book_found_by_the_isbn_alone_on_both_shops(tmp_path, fake):  # noqa: F811
+    """社交高手必修課: eslite's own search does not know it; the web search for the ISBN alone on eslite.com +
+    books.com.tw (like Google's "9789574760190 (site:eslite.com OR site:books.com.tw)") finds its product page."""
+    isbn = "9789574760190"
+    s = fake({"athena.eslite.com/api/v2/search": Resp(200, {"hits": {"start": 0, "found": "0", "hit": []}}),
+              "search.books.com.tw": Resp(200, text="<html>no result</html>"),
+              "api.tavily.com/search": Resp(200, {"results": [
+                  {"url": "https://www.eslite.com/product/1001129761363896?srsltid=AYCX9vKr", "title": "社交高手必修課"}]}),
+              "athena.eslite.com/api/v1/products/1001129761363896": Resp(200, {
+                  "id": 1363896, "name": "社交高手必修課", "final_price": 280, "retail_price": 221.0,
+                  "author": "梁曉鶯", "ean": isbn, "isbn13": isbn, "is_ebook": False, "product_type": "book"})})
+    cfg = cfg_for(tmp_path, market_providers=("eslite", "books_tw"), tavily_api_key="T")
+    got = market.find_market_price(isbn, "社交高手必修課", cfg, author="瑪麗蓮・屏克斯(Marilyn Pincus)作; 梁曉鶯譯")
+    assert got["market_price"] == "280" and got["market_source"] == "eslite (web search)"
+    first = [c for c in s.calls if "tavily" in c[1]][0][2]["json"]
+    assert first["query"] == isbn and first["include_domains"] == ["eslite.com", "books.com.tw"]
+
+
+def test_a_web_search_that_could_not_run_is_not_remembered(tmp_path, fake, monkeypatch):  # noqa: F811
+    monkeypatch.setattr(net.time, "sleep", lambda s: None)
+    isbn = "9789574760190"
+    fake({"athena.eslite.com/api/v2/search": Resp(200, {"hits": {"found": "0", "hit": []}}),
+          "api.tavily.com/search": Resp(500, {"error": "down"})})
+    cfg = cfg_for(tmp_path, market_providers=("eslite",), tavily_api_key="T", market_similar=False)
+    got = market.find_market_price(isbn, "社交高手必修課", cfg)
+    assert any("could not be made" in e for e in got["_errors"])          # said, and not cached as "not found"
+    debug = list((tmp_path / "cache" / "debug").glob("*market_9789574760190*"))
+    assert debug and "web search" in debug[0].read_text(encoding="utf-8")   # what was tried, for checking
+    fake({"athena.eslite.com/api/v2/search": Resp(200, {"hits": {"found": "0", "hit": []}}),
+          "api.tavily.com/search": Resp(200, {"results": [{"url": "https://www.eslite.com/product/1001129761363896"}]}),
+          "athena.eslite.com/api/v1/products/1001129761363896": Resp(200, {"name": "社交高手必修課", "ean": isbn,
+                                                                         "final_price": 280})})
+    assert market.find_market_price(isbn, "社交高手必修課", cfg)["market_price"] == "280"   # asked again

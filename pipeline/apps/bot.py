@@ -62,8 +62,8 @@ HELP = (
     "covers send the front photo as a File (Telegram shrinks normal photos). Files over 20 MB cannot be received by "
     "bots.\n"
     "Captions (all optional): 'retake' = replaces the previous back photo; 'front' = starts a new set early (short "
-    "set); '良好 150' (or 'good 150') on the front photo = condition/price for the whole set (grades: 全新 近全新 "
-    "良好 普通 差強人意).\n\n"
+    "set); '良好 150' (or 'good 150') on the front photo = condition/price for the whole set (grades: 全新 new, "
+    "近全新 as new, 良好 good, 普通 fair, 差強人意 poor).\n\n"
     "/undo - remove the last photo\n/status - where am I\n/process - ingest everything sent so far\n"
     "/todo - which books still need fixing"
 )

@@ -60,6 +60,7 @@ def _number(text) -> str:
 def _dejunk(s: str) -> str:
     for j in JUNK:
         s = s.replace(j, "")
+    s = re.sub(r"(?<=[\u3400-\u9fff])[?？](?=[\u3400-\u9fff])", "．", s)   # a middle dot lost in a name: 柯爾?諾瑟
     s = re.sub(r"\s*,(\s*,)*", ",", s).replace(",", ", ").replace(",  ", ", ")
     return re.sub(r"\s+", " ", s).strip(" ,，、")
 
@@ -140,7 +141,8 @@ def parse_eslite_product(d: dict) -> dict:
 def eslite_product(product_id: str, cfg: Config) -> dict:
     """The raw product JSON: GET https://athena.eslite.com/api/v1/products/<id>
     (has isbn13 / isbn10 / ean, final_price = 定價 list price, retail_price = sale price, product_button_status)."""
-    return net.request("eslite", "GET", ESLITE_PRODUCT.format(id=product_id), memo=True,
+    # its own name: eslite's SEARCH refusing us must not stop us reading a product page a web search found
+    return net.request("eslite_product", "GET", ESLITE_PRODUCT.format(id=product_id), memo=True,
                        headers=_headers(cfg, "https://www.eslite.com/", "application/json"),
                        min_interval=cfg.scrape_delay) or {}
 
@@ -281,9 +283,11 @@ def parse_ncl(page: str, isbn: str) -> dict:
             cells = [c.get_text(" ", strip=True) for c in tr.find_all(["td", "th"])]
             if len(cells) <= col["title"]:
                 continue
-            row_isbns = {normalize(x) for x in re.findall(r"[0-9Xx-]{10,17}", " ".join(cells))}
-            if isbn not in row_isbns and "isbn" in col:
-                continue
+            # the row's ISBN: its own column, or the cover picture's text ("isbn:9789867458803's cover") / links
+            attrs = " ".join(str(t.get(a) or "") for t in tr.find_all(True) for a in ("alt", "title", "href", "src"))
+            row_isbns = {normalize(x) for x in re.findall(r"[0-9Xx-]{10,17}", " ".join(cells) + " " + attrs)} - {None}
+            if isbn not in row_isbns and ("isbn" in col or row_isbns):
+                continue                       # another book's row
             get = lambda k: cells[col[k]] if k in col and col[k] < len(cells) else ""
             return {"title": _dejunk(get("title")), "author": _dejunk(get("author")),
                     "publisher": _dejunk(get("publisher")), "year": _roc_year(get("year")),
@@ -361,6 +365,36 @@ def parse_ncl_detail(page: str) -> dict:
 
 
 NCL_SEARCH = "H30_SearchBooks.php"
+NCL_RESULTS = "main_DisplayResults.php"
+_NCL_READY: dict = {}      # base -> True once this run has a session with NCL (its search lives in that session)
+
+
+class NCLUnavailable(RuntimeError):
+    """NCL could not be searched at all (errors only) - not the same as "not found", so nothing is cached."""
+
+
+def _ncl_fetch(cfg: Config, method: str, url: str, hdr: dict, **kw) -> str:
+    """One NCL page. retries=1: a server error (500 - e.g. a search without a session) is a plain error for this
+    attempt, not a reason to stop asking NCL for the rest of the run."""
+    page = net.request("ncl", method, url, headers=hdr, min_interval=cfg.scrape_delay, expect="text", retries=1,
+                       **kw) or ""
+    if "Fatal error" in page[:2000] and "Uncaught" in page[:2000]:
+        raise RuntimeError("NCL answered with a server error page")
+    return page
+
+
+def _ncl_session(cfg: Config, base: str, hdr: dict, again: bool = False) -> None:
+    """NCL keeps each search in a server-side session (a cookie): a search sent without one fails with a server
+    error. Opening the search page first starts the session; the cookie is then sent with every request."""
+    if _NCL_READY.get(base) and not again:
+        return
+    try:
+        _ncl_fetch(cfg, "GET", f"{base}/{NCL_SEARCH}", hdr, params={"Pact": "DisplayAll4Simple"})
+        _NCL_READY[base] = True
+    except net.ProviderBlocked:
+        raise
+    except Exception:
+        pass
 
 
 def _ncl_record(page: str, isbn: str, base: str, cfg: Config, where: str, strict: bool = False) -> dict:
@@ -389,37 +423,50 @@ def from_ncl(isbn: str, cfg: Config, title: str = "") -> dict:
     """國家圖書館 全國新書資訊網 (Taiwan's ISBN agency) - free, no key, knows out-of-print books. Its catalogue search
     returns a row per book (書名, 作者, 出版者...). When the title is a link, the full record behind it also has the
     price the publisher registered (定價, e.g. NT$360) and the subject heading (主題標題, used as the genre).
-    Searches, until one finds a record listing OUR ISBN:
+    NCL keeps the search in a session, so the search page is opened first (once per run) and its cookie kept. Then,
+    until one finds a record listing OUR ISBN:
         1. quick search:  GET {base}/H30_SearchBooks.php?Pact=Search&Pval=9789869283533
-        2. catalogue search by the ISBN field:
+        2. the same on the results page: GET {base}/main_DisplayResults.php?Pact=Search&Pval=9789869283533
+        3. catalogue search by the ISBN field:
                           POST {base}/H30_SearchBooks.php?Pact=DisplayAll4Simple
                           FO_SearchField0=ISBN&FO_SearchValue0=9789869283533&FB_clicked=FB_開始查詢
-        3. quick search by the title (when known) - the record must still list our ISBN
+        4. the results of this session's search: GET {base}/main_DisplayResults.php?Pact=DisplayAll
+        5. quick search by the title (when known) - the record must still list our ISBN
         full record:      GET {base}/main_DisplayRecord_Popup.php?Pact=view&Pkey=1050307*0123
-    A search that finds nothing is saved to data/cache/debug (send it if NCL keeps missing a book you can find there)."""
+    A search that finds nothing is saved to data/cache/debug (send it if NCL keeps missing a book you can find there).
+    If NCL could not be searched at all, NCLUnavailable is raised (so "not found" is not remembered)."""
     base = cfg.ncl_base
     hdr = _headers(cfg, base + "/")
+    _ncl_session(cfg, base, hdr)
     searches = [("isbn", "GET", f"{base}/{NCL_SEARCH}", {"params": {"Pact": "Search", "Pval": isbn}}),
+                ("results", "GET", f"{base}/{NCL_RESULTS}", {"params": {"Pact": "Search", "Pval": isbn}}),
                 ("catalogue", "POST", f"{base}/{NCL_SEARCH}?Pact=DisplayAll4Simple",
                  {"data": {"FO_SearchField0": "ISBN", "FO_SearchValue0": isbn, "FO_SchRe1ation0": "AND",
-                           "FB_clicked": "FB_開始查詢", "FB_pageSID": "Simple"}})]
+                           "FB_clicked": "FB_開始查詢", "FB_pageSID": "Simple"}}),
+                ("session", "GET", f"{base}/{NCL_RESULTS}", {"params": {"Pact": "DisplayAll"}})]
     t = re.split(r"\s*[:：(（]", title or "")[0].strip()
     if t:
         searches.append(("title", "GET", f"{base}/{NCL_SEARCH}", {"params": {"Pact": "Search", "Pval": t}}))
-    last = ""
+    last, answered, errors = "", False, []
+    where = f"{base}/{NCL_SEARCH}?Pact=Search&Pval={isbn}"
     for how, method, url, kw in searches:
         try:
-            page = net.request("ncl", method, url, headers=hdr, min_interval=cfg.scrape_delay, expect="text",
-                               memo=method == "GET", **kw) or ""
+            page = _ncl_fetch(cfg, method, url, hdr, **kw)
         except net.ProviderBlocked:
             raise
-        except Exception:
+        except Exception as exc:
+            errors.append(f"{how}: {exc}")
+            if not answered and how == "isbn":
+                _ncl_session(cfg, base, hdr, again=True)        # the session may have expired: start a new one
             continue
-        where = f"{base}/{NCL_SEARCH}?Pact=Search&Pval={isbn}"
-        got = _ncl_record(page, isbn, base, cfg, where, strict=how == "title")
+        answered = answered or how in ("isbn", "results")    # NCL really searched (not just showed its form)
+        # a page listing other books' rows only (a title search, or the session's results) must show OUR ISBN
+        got = _ncl_record(page, isbn, base, cfg, where, strict=how in ("title", "session"))
         if got:
             return got
         last = page
     if last:
         net.save_debug(cfg.cache_dir, f"ncl_search_{isbn}", last)
+    if not answered:
+        raise NCLUnavailable("NCL could not be searched (" + "; ".join(errors[:2]) + ")")
     return {}

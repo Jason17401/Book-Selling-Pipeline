@@ -70,3 +70,14 @@ def test_add_on_search_area_is_right_of_the_isbn_barcode():
     assert len(crops) == 1 and crops[0].width >= 1800 * 0.99           # enlarged
     assert addon_crops(img, Detection("9789861371955")) == []         # no position known: whole photo only
     assert read_addon(img, "9789861371955") == ""                      # nothing there: no crash, no guess
+
+
+def test_defaults_and_settings_no_longer_used(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    for k in ("GRID", "SET_SIZE"):
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setenv("BOOK_PROVIDERS", "openlibrary,google,isbndb")     # an older .env: isbndb is gone, no error
+    monkeypatch.setenv("S3_BUCKET", "books")                              # ignored: photos go to ImgBB only
+    cfg = Config.from_env()
+    assert cfg.providers == ("openlibrary", "google") and cfg.grid == (2, 4) and cfg.set_size == 8
+    assert cfg.photo_service == "" and not hasattr(cfg, "s3_bucket") and not hasattr(cfg, "isbndb_key")

@@ -319,7 +319,7 @@ def test_taiwanese_isbn_gets_the_chinese_title_not_googles_english_one(tmp_path)
     got = lookup_book("9789862167557", cfg, providers=providers)
     assert calls == ["google", "ncl"]                         # google had everything, but only in English
     assert got["title"] == "神奇樹屋. 44, 狄更斯的耶誕頌" and got["author"] == "瑪麗.波.奧斯本"
-    assert got["title_other"] == "A Ghost Tale for Christmas Time" and got["publisher"] == "Commonwealth"
+    assert got["title_other"] == "A Ghost Tale for Christmas Time" and got["publisher"] == "天下遠見"  # Chinese wins
     calls.clear()
     lookup_book("9781862305717", cfg_for(tmp_path / "en", providers=("google", "ncl"),
                                          stop_when=("title", "author", "publisher", "year")), providers=providers)
@@ -331,7 +331,19 @@ def test_titles_command_fixes_old_rows(tmp_path):
     cfg = cfg_for(tmp_path, market_providers=())
     rows = [{"sku": "a", "isbn13": "9789862167557", "title": "A Ghost Tale for Christmas Time",
              "author": "Mary P. Osborne", "status": "enriched"},
-            {"sku": "b", "isbn13": "9789862164914", "title": "月光下的魔笛", "author": "x", "status": "validated"}]
-    changed = chinese_titles(rows, cfg, lookup=lambda isbn, c: {"title": "狄更斯的耶誕頌", "author": "瑪麗.波.奧斯本"})
-    assert changed == ["a"] and rows[0]["title"] == "狄更斯的耶誕頌" and rows[0]["author"] == "瑪麗.波.奧斯本"
+            {"sku": "b", "isbn13": "9789862164914", "title": "月光下的魔笛", "author": "奧斯本", "publisher": "天下遠見",
+             "status": "validated"},
+            {"sku": "c", "isbn13": "9789867458803", "title": "衝業績一定有效的10種態度", "author": "",
+             "publisher": "早安財經文化出版", "status": "needs_manual", "book_source": "google"}]
+    found = {"9789862167557": {"title": "狄更斯的耶誕頌", "author": "瑪麗.波.奧斯本", "publisher": "天下遠見",
+                               "source": "ncl"},
+             "9789867458803": {"title": "衝業績一定有效的10個態度", "author": "Dave Anderson著; 吳玉譯",
+                               "publisher": "早安財經文化", "source": "ncl"}}
+    asked = []
+    changed = chinese_titles(rows, cfg, lookup=lambda isbn, c: asked.append(isbn) or found.get(isbn, {}))
+    assert asked == ["9789862167557", "9789867458803"]          # b is all Chinese already: not asked
+    assert changed == ["a", "c"] and rows[0]["title"] == "狄更斯的耶誕頌" and rows[0]["author"] == "瑪麗.波.奧斯本"
+    assert rows[0]["publisher"] == "天下遠見"
+    assert rows[2]["author"] == "Dave Anderson著; 吳玉譯" and rows[2]["title"] == "衝業績一定有效的10種態度"  # kept
+    assert rows[2]["book_source"] == "google+ncl"
     assert "English title: A Ghost Tale for Christmas Time" in rows[0]["notes"]

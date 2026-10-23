@@ -12,5 +12,3 @@ msoffcrypto-tool>=5.4          # opens Shopee's password-protected order report
 # Optional third reader (often reads blurry/glary barcodes the others miss). On Windows it may also need the
 # "Microsoft Visual C++ Redistributable"; if it fails to load it is simply skipped.
 # pyzbar>=0.1.9
-# Optional: uploads the listing photos to a bucket (Cloudflare R2) so Shopee gets photo links - SETUP.md step 7
-# boto3>=1.34

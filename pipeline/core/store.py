@@ -164,8 +164,9 @@ def _upgrade(r: dict) -> dict:
         r["back_photo"] = r.pop("barcode_photo", "") or r.get("back_crop", "") or ""
     if not r.get("set_photo") and r.get("front_photo"):   # older rows: front_photo WAS the whole-set photo
         r["set_photo"] = r["front_photo"]
-    if r.get("condition") == "acceptable":       # renamed to the Taiwanese grade 普通 = fair
-        r["condition"] = "fair"
+    old = {"acceptable": "fair", "like_new": "as_new"}      # renamed: TAAZE's grades 普通 = fair, 近全新 = as_new
+    if r.get("condition") in old:
+        r["condition"] = old[r["condition"]]
     if "source" in r and not r.get("book_source"):   # renamed: where the book's details came from
         r["book_source"] = r.pop("source") or ""
     if (r.get("market_source") or "").startswith("barcode"):   # priced from the book itself: no ISBN to note

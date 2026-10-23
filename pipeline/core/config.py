@@ -29,7 +29,9 @@ def _csv(text: str) -> tuple:
     return tuple(x.strip().lower() for x in (text or "").split(",") if x.strip())
 
 
-ALL_PROVIDERS = ("openlibrary", "openlibrary_search", "google", "isbndb", "eslite", "books_tw", "ncl")
+ALL_PROVIDERS = ("openlibrary", "openlibrary_search", "google", "eslite", "books_tw", "ncl")
+OLD_DEFAULT_TW = ("google", "ncl", "eslite", "books_tw", "openlibrary")   # BOOK_PROVIDERS_TW of older versions
+REMOVED_PROVIDERS = ("isbndb",)    # no longer supported: quietly left out if an older .env still lists them
 
 
 @dataclass
@@ -38,11 +40,10 @@ class Config:
     telegram_token: str = ""
     allowed_user_ids: set = field(default_factory=set)
     google_books_key: str = ""
-    isbndb_key: str = ""
-    isbndb_base: str = "https://api2.isbndb.com"
     contact_email: str = "you@example.com"
-    providers: tuple = ("openlibrary", "openlibrary_search", "google", "isbndb")
-    providers_tw: tuple = ("google", "ncl", "eslite", "books_tw", "openlibrary")  # used for Taiwanese ISBNs (957/986/626)
+    providers: tuple = ("openlibrary", "openlibrary_search", "google")
+    providers_tw: tuple = ("ncl", "eslite", "books_tw", "google", "openlibrary")  # Taiwanese ISBNs (957/986/626):
+    # the Chinese sources first - Google often only knows a translated book's English title / author / publisher
     stop_when: tuple = ("title", "author", "publisher", "year", "genre")  # stop asking more providers once these are filled
     cache_days: int = 180          # remember what a provider returned for an ISBN (saves your Google quota)
     cache_miss_days: int = 7       # remember "not found" for this long, then ask again
@@ -54,13 +55,13 @@ class Config:
     eslite_details: bool = False   # one extra eslite call per book to get page count and binding
     min_price: float = 1.0
     max_price: float = 500.0
-    grid: tuple = (2, 5)  # rows x cols the books are laid out in on the front photo
+    grid: tuple = (2, 4)  # rows x cols the books are laid out in on the front photo
     region: tuple = (0.0, 0.0, 1.0, 1.0)  # left, top, right, bottom of the books as fractions of the photo (ignore blank margins)
     segment: str = "auto"          # auto = find each book on the front photo; grid = equal cells (the old way)
     segment_margin: float = 0.04   # table kept around each cut-out book cover, as a fraction of the book's size
     rotate: int = 0  # degrees CLOCKWISE to turn every photo so it is upright (0/90/180/270); see `orient`
     default_currency: str = "TWD"  # used when a price is given without a currency
-    default_condition: str = "like_new"  # condition of a new book unless a caption says otherwise ("" = none)
+    default_condition: str = "as_new"  # condition of a new book unless a caption says otherwise ("" = none)
     # market price of a NEW copy and your price from it (see pipeline/sources/market.py)
     market_providers: tuple = ("barcode", "ncl", "eslite", "books_tw")
     market_search: tuple = ("isbn", "isbn10", "title", "web")
@@ -68,14 +69,15 @@ class Config:
     tavily_api_key: str = ""
     langsearch_api_key: str = ""
     web_search_monthly_limit: int = 900
-    web_queries: tuple = ("site", "shop")   # "9789574760190 site:eslite.com", then "eslite 9789574760190"
+    web_queries: tuple = ("isbn", "site", "shop")   # "9789574760190" on all shops, "9789574760190 site:eslite.com",
+    #                                                then "eslite 9789574760190"
     market_similar: bool = True    # no copy with this ISBN anywhere: use another edition (same title + author)
     market_title_pages: int = 3    # books.com.tw: product pages checked per title search
     auto_price: bool = True        # fill an EMPTY price from the market price
     price_ratio: float = 0.4       # your price = market price x this
     price_round: str = "TWD:1,*:0.5"  # round your automatic price per currency (0 = cents)
     listing_show_market: bool = True  # show "new: 300 TWD" next to each book in listings
-    set_size: int = 10
+    set_size: int = 8
     decoders: tuple = ("zxing", "zbar", "opencv")
     decode_effort: str = "normal"  # fast | normal | max
     bot_timeout: float = 30.0  # seconds the Telegram bot waits for Telegram before retrying (BOT_TIMEOUT)
@@ -90,24 +92,13 @@ class Config:
     shopee_max_images: int = 9
     shopee_shop_id: str = ""           # your shop's number, to build product links (blank = links only from what you paste)
     shopee_export_password: str = ""   # password of Shopee's order report (it is protected), to open it automatically
-    # photos online, so their links go in the upload file (blank PHOTO_HOST: imgbb if IMGBB_API_KEY is set, s3 if
-    # S3_BUCKET is set, else none = you add the photos by hand in Seller Center)
-    photo_host: str = ""               # imgbb | s3 | none
+    # photos online on ImgBB, so their links go in the upload file (no key: you add the photos by hand in Seller Center)
     imgbb_api_key: str = ""
-    image_public_url: str = ""         # s3: photos online at <this>/<product code>/01.jpg ...
-    s3_endpoint_url: str = ""          # S3-compatible bucket (e.g. Cloudflare R2) the photos are uploaded to
-    s3_bucket: str = ""
-    s3_access_key_id: str = ""
-    s3_secret_access_key: str = ""
 
     @property
     def photo_service(self) -> str:
-        """Where the listing photos go online: imgbb, s3 or '' (nowhere - you add them by hand)."""
-        if self.photo_host == "none":
-            return ""
-        if self.photo_host:
-            return self.photo_host
-        return "imgbb" if self.imgbb_api_key else "s3" if self.image_public_url else ""
+        """Where the listing photos go online: "imgbb" (IMGBB_API_KEY set) or '' (nowhere - you add them by hand)."""
+        return "imgbb" if self.imgbb_api_key else ""
 
     @property
     def inbox(self) -> Path:
@@ -195,11 +186,9 @@ class Config:
             telegram_token=e("TELEGRAM_BOT_TOKEN", ""),
             allowed_user_ids=ids,
             google_books_key=e("GOOGLE_BOOKS_API_KEY", ""),
-            isbndb_key=e("ISBNDB_API_KEY", ""),
-            isbndb_base=e("ISBNDB_BASE_URL", "https://api2.isbndb.com"),
             contact_email=e("CONTACT_EMAIL", "you@example.com"),
-            providers=_csv(e("BOOK_PROVIDERS", "openlibrary,openlibrary_search,google,isbndb")),
-            providers_tw=_csv(e("BOOK_PROVIDERS_TW", "google,ncl,eslite,books_tw,openlibrary")),
+            providers=_csv(e("BOOK_PROVIDERS", "openlibrary,openlibrary_search,google")),
+            providers_tw=_csv(e("BOOK_PROVIDERS_TW", "ncl,eslite,books_tw,google,openlibrary")),
             stop_when=_csv(e("LOOKUP_STOP_WHEN", "title,author,publisher,year,genre")),
             cache_days=int(e("LOOKUP_CACHE_DAYS", "180") or 0),
             cache_miss_days=int(e("LOOKUP_CACHE_MISS_DAYS", "7") or 0),
@@ -211,27 +200,28 @@ class Config:
             eslite_details=e("ESLITE_DETAILS", "0").strip().lower() in ("1", "yes", "true", "on"),
             min_price=float(e("MIN_PRICE", "1")),
             max_price=float(e("MAX_PRICE", "500")),
-            grid=tuple(int(x) for x in e("GRID", "2x5").lower().split("x")),
+            grid=tuple(int(x) for x in e("GRID", "2x4").lower().split("x")),
             region=tuple(float(x) for x in e("REGION", "0,0,1,1").split(",")),
             rotate=rotate,
             segment=(e("SEGMENT", "auto").strip().lower() or "auto"),
             segment_margin=max(0.0, float(e("SEGMENT_MARGIN", "0.04") or 0)),
             default_currency=(e("DEFAULT_CURRENCY", "TWD").strip().upper() or "TWD"),
-            default_condition=e("DEFAULT_CONDITION", "like_new").strip().lower(),
+            default_condition=e("DEFAULT_CONDITION", "as_new").strip().lower(),
             market_providers=_csv(e("MARKET_PROVIDERS", "barcode,ncl,eslite,books_tw")),
             market_search=_csv(e("MARKET_SEARCH", "isbn,isbn10,title,web")),
             web_search=e("WEB_SEARCH", "").strip().lower(),
             tavily_api_key=e("TAVILY_API_KEY", "").strip(),
             langsearch_api_key=e("LANGSEARCH_API_KEY", "").strip(),
             web_search_monthly_limit=int(e("WEB_SEARCH_MONTHLY_LIMIT", "900") or 0),
-            web_queries=tuple(q for q in _csv(e("WEB_QUERIES", "site,shop")) if q in ("site", "shop")) or ("site",),
+            web_queries=tuple(q for q in _csv(e("WEB_QUERIES", "isbn,site,shop")) if q in ("isbn", "site", "shop"))
+            or ("isbn",),
             market_title_pages=int(e("MARKET_TITLE_PAGES", "3") or 3),
             market_similar=e("MARKET_SIMILAR", "1").strip().lower() not in ("0", "no", "false", "off"),
             auto_price=e("AUTO_PRICE", "1").strip().lower() in ("1", "yes", "true", "on"),
             price_ratio=_ratio(e("PRICE_RATIO", "0.4")),
             price_round=e("PRICE_ROUND", "TWD:1,*:0.5").strip(),
             listing_show_market=e("LISTING_SHOW_MARKET", "1").strip().lower() in ("1", "yes", "true", "on"),
-            set_size=int(e("SET_SIZE", "10")),
+            set_size=int(e("SET_SIZE", "8")),
             decoders=_csv(e("DECODERS", "zxing,zbar,opencv")),
             decode_effort=e("DECODE_EFFORT", "normal").strip().lower(),
             settle_seconds=int(e("SETTLE_SECONDS", "5")),
@@ -245,16 +235,14 @@ class Config:
             shopee_max_images=max(2, int(e("SHOPEE_MAX_IMAGES", "9") or 9)),
             shopee_shop_id=e("SHOPEE_SHOP_ID", "").strip(),
             shopee_export_password=e("SHOPEE_EXPORT_PASSWORD", "").strip(),
-            photo_host=e("PHOTO_HOST", "").strip().lower(),
             imgbb_api_key=e("IMGBB_API_KEY", "").strip(),
-            image_public_url=e("IMAGE_PUBLIC_URL", "").strip().rstrip("/"),
-            s3_endpoint_url=e("S3_ENDPOINT_URL", "").strip(),
-            s3_bucket=e("S3_BUCKET", "").strip(),
-            s3_access_key_id=e("S3_ACCESS_KEY_ID", "").strip(),
-            s3_secret_access_key=e("S3_SECRET_ACCESS_KEY", "").strip(),
         )
-        if cfg.photo_host not in ("", "imgbb", "s3", "none"):
-            raise SystemExit(f"PHOTO_HOST in .env: '{cfg.photo_host}' - use imgbb, s3 or none (or leave it blank)")
+        if cfg.web_queries == ("site", "shop"):           # an older .env's default: today's (the plain ISBN first)
+            cfg.web_queries = cls.web_queries
+        if cfg.providers_tw == OLD_DEFAULT_TW:          # an older .env's default order: today's default instead
+            cfg.providers_tw = cls.providers_tw
+        cfg.providers = tuple(p for p in cfg.providers if p not in REMOVED_PROVIDERS)
+        cfg.providers_tw = tuple(p for p in cfg.providers_tw if p not in REMOVED_PROVIDERS)
         unknown = [p for p in cfg.providers + cfg.providers_tw if p not in ALL_PROVIDERS]
         if unknown:
             raise SystemExit(f"Unknown book provider(s) in .env: {', '.join(unknown)}. Known: {', '.join(ALL_PROVIDERS)}")

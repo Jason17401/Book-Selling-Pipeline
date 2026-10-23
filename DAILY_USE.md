@@ -13,7 +13,7 @@ them from its **Sell products** window - Shopee's upload file, order reports, ev
 7. [All commands](#7-all-commands)
 8. [Troubleshooting](#8-troubleshooting)
 
-**Words used here.** A **set** is the books of one front photo (up to 10, photographed together). A **product** is
+**Words used here.** A **set** is the books of one front photo (8 by default, photographed together). A **product** is
 what you sell as one thing: a whole set (the default), or - when you choose it for a set - each of its books on its
 own. Each product has a **product code**
 (for a set: batch + set id, e.g. `20261008-153012-S01`). A **listing** is a product on one platform (Shopee now).
@@ -28,21 +28,21 @@ Double-click **`bot.bat`** and leave its window open while you work. It shows ea
 ## 2. Send a set (in Telegram)
 
 1. Send the **front photo** on its own and wait for the reply `Set 1: FRONT photo saved`.
-2. Select the **10 back photos in book order** and send them in **one go** (one album). Never select more than 10
+2. Select the **8 back photos in book order** and send them in **one go** (one album). Never select more than 10
    at once - Telegram splits bigger selections into albums that can arrive out of order.
-3. The bot answers once the album has arrived: `Set 1: barcode 10/10 saved. Set complete`.
-4. Next set: front photo again, then its 10 back photos. Send as many sets as you like before processing.
+3. The bot answers once the album has arrived: `Set 1: barcode 8/8 saved. Set complete`.
+4. Next set: front photo again, then its 8 back photos. Send as many sets as you like before processing.
 
 **Captions** (optional, typed with a photo):
 
 | Caption | On the front photo | On a back photo |
 |---|---|---|
-| a condition: `全新` `近全新` `良好` `普通` `差強人意` (or `new` `like new` `good` `fair` `poor`) | condition of every book in the set | condition of that book |
+| a condition: `全新` `近全新` `良好` `普通` `差強人意` (or `new` `as new` `good` `fair` `poor`) | condition of every book in the set | condition of that book |
 | condition + price: `良好 150`, `good 150 TWD` | condition + price for every book | condition + price for that book |
 | `retake` | - | replaces the previous back photo (send it right after the bad one) |
-| `front` | starts a new set early (a set of fewer than 10 books) | - |
+| `front` | starts a new set early (a set of fewer than 8 books) | - |
 
-Without a caption, books are 近全新 (`like_new`) and priced from the market price. The grades are explained in
+Without a caption, books are 近全新 as new (`as_new`) and priced from the market price. The grades are explained in
 [DATA_AND_STATUSES.md](DATA_AND_STATUSES.md#condition-grades).
 
 ## 3. Process
@@ -176,7 +176,7 @@ buttons or `.bat` files; the rest are for fixing and checking.
 | `export-sets` | a plain listing folder per finished set (photo + text, any platform). `--set-price 40 --set-currency NZD` for one bundle price, `--with-barcodes`, `--force` to redo |
 | `ingest` | processes `data\inbox` without the bot (photos copied there yourself) |
 | `market` | finds market prices for books that have none. `--redo-similar` searches again for books priced from another edition; `--reprice` recomputes automatic prices after changing `PRICE_RATIO`; `market <isbn>` tests one book |
-| `titles` | gives older Taiwanese books saved with an English title their Chinese title |
+| `titles` | Taiwanese books saved with English (or missing) title / author / publisher get the Chinese ones (books not yet listed) |
 | `genres` | looks up the genre of books saved before genres existed |
 | `segment <photo>` | shows how a front photo is cut into books (`--covers folder` also saves the cut-outs) |
 | `covers` | cuts each book's own cover out of the set photo for books processed before this existed (`--redo` cuts all not-yet-listed covers again, e.g. after an update) |
@@ -191,13 +191,14 @@ buttons or `.bat` files; the rest are for fixing and checking.
 
 | Problem | What to do |
 |---|---|
-| A bot reply skips a number (`barcode 6/10` after `4/10`) | a photo didn't arrive: `/undo` back to the gap, or send the missing photo again before the next one |
+| A bot reply skips a number (`barcode 6/8` after `4/8`) | a photo didn't arrive: `/undo` back to the gap, or send the missing photo again before the next one |
 | `NOT SAVED: this file is .. MB` | Telegram bots can't receive files over 20 MB - send it as a normal photo |
 | Numbers on the review sheet are on the wrong books | the front photo is sideways: [SETUP.md step 5](SETUP.md#5-photograph-your-first-set) (`orient`), or photos were sent out of order |
 | A cover picture is cut badly | `python -m pipeline segment <front photo>` shows the boxes; leave gaps between books, use a plainer surface, or `REGION` to ignore clutter around the books; `SEGMENT=grid` as a last resort |
 | Cover pictures are blurry | send the front photo as a File (Telegram shrinks normal photos) |
 | A barcode won't read | type the ISBN in the review window, or test the photo with `check-barcode` |
 | No market price for many books | add a Tavily key ([SETUP.md step 4](SETUP.md#4-free-keys-for-finding-more-books)); if books.com.tw blocks you, its pages are saved in `data\cache\debug` |
+| No market price for a book you can find online | press **Find** in the review window (it always searches again), or paste the shop's link into **Shop link**. What the search tried is in `data\cache\debug\..._market_<isbn>.html` - send it if the book's shop page exists but was not found |
 | `books.csv is busy` | close it in Excel / another program |
 | The bot window shows odd characters like `←[1A` | set `PLAIN_PROGRESS=1` in `.env` |
 | "No Shopee template yet" | put Shopee's downloaded template (any name) into `data\listings\shopee\template\` - [SETUP.md step 6](SETUP.md#6-get-ready-to-sell-on-shopee) |

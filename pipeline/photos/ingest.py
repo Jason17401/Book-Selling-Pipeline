@@ -14,12 +14,12 @@ from ..sources.lookup import lookup_book
 
 IMG_EXT = {".jpg", ".jpeg", ".png", ".heic", ".heif", ".webp"}
 _COND_WORDS = {
-    "new": "new", "likenew": "like_new", "like_new": "like_new", "mint": "like_new",
+    "new": "new", "asnew": "as_new", "as_new": "as_new", "likenew": "as_new", "like_new": "as_new", "mint": "as_new",
     "good": "good", "ok": "fair", "fair": "fair", "acceptable": "fair",
     "poor": "poor", "worn": "poor",
 }
 # Chinese condition words in a caption (longest first, so 近全新 is not read as 全新)
-_COND_ZH = [("差強人意", "poor"), ("近全新", "like_new"), ("九成新", "like_new"), ("全新", "new"), ("良好", "good"),
+_COND_ZH = [("差強人意", "poor"), ("近全新", "as_new"), ("九成新", "as_new"), ("全新", "new"), ("良好", "good"),
             ("八成新", "good"), ("普通", "fair"), ("七成新", "fair"), ("差", "poor")]
 
 
@@ -60,8 +60,8 @@ def list_photos(inbox: Path, settle_seconds: int = 5) -> list:
 
 
 def parse_caption(text: str, default_currency: str = "TWD"):
-    """'good 12.50' -> ('good', '12.50', 'TWD'); 'like new 150 NZD' -> ('like_new', '150', 'NZD');
-    '近全新 150' / '良好150' -> ('like_new', '150', 'TWD'). Any part may be missing (all optional)."""
+    """'good 12.50' -> ('good', '12.50', 'TWD'); 'as new 150 NZD' -> ('as_new', '150', 'NZD') ('like new' too);
+    '近全新 150' / '良好150' -> ('as_new', '150', 'TWD'). Any part may be missing (all optional)."""
     t = (text or "").replace("$", " ")
     cond, price, currency = "", "", ""
     for word, code in _COND_ZH:
@@ -69,7 +69,8 @@ def parse_caption(text: str, default_currency: str = "TWD"):
             cond = code
             t = t.replace(word, " ")
             break
-    for tok in re.split(r"[\s,]+", t.lower().replace("like new", "like_new")):
+    low = t.lower().replace("like new", "as_new").replace("as new", "as_new")
+    for tok in re.split(r"[\s,]+", low):
         if tok in _COND_WORDS and not cond:
             cond = _COND_WORDS[tok]
         elif re.fullmatch(r"\d+(?:\.\d+)?", tok) and not price:
@@ -138,28 +139,38 @@ def enrich_rows(rows: list, cfg: Config, lookup: Callable = lookup_book) -> int:
 
 
 def chinese_titles(rows: list, cfg: Config, lookup: Callable = lookup_book) -> list:
-    """Taiwanese books saved with an ENGLISH title (Google only knew the English one): look them up again for the
-    Chinese title (and Chinese author name), keep the English title in notes, and search the market price again if
-    it was not an exact match. Returns the skus changed."""
+    """Taiwanese books saved with ENGLISH (or missing) details - Google only knew the English title, author or
+    publisher, or a Chinese source could not be reached: look them up again and take the Chinese title / author /
+    publisher / genre (an empty field is filled too). The English title and author are kept in notes; the market price
+    is searched again if it was not an exact match. Listed / sold books are left alone. Returns the skus changed."""
     from ..sources.lookup import has_cjk, is_taiwan
     from ..sources.market import apply_market, forget_market
     from ..core.validate import DONE, refresh_status
     changed = []
     for r in rows:
         isbn = r.get("isbn13", "")
-        if r.get("status") in DONE or not isbn or not is_taiwan(isbn) or has_cjk(r.get("title")):
+        if r.get("status") in DONE or not isbn or not is_taiwan(isbn):
+            continue
+        if all(has_cjk(r.get(k)) for k in ("title", "author", "publisher")):
             continue
         meta = lookup(isbn, cfg)
-        if not has_cjk(meta.get("title")):
+        before = dict(r)
+        notes = []
+        for k in ("title", "author", "publisher", "genre"):
+            new = meta.get(k) or ""
+            if not new or has_cjk(r.get(k)) or (r.get(k) and not has_cjk(new)):
+                continue                       # already Chinese, or nothing better (Chinese) found
+            if r.get(k) and k in ("title", "author"):
+                notes.append(f"{'English title' if k == 'title' else 'author in English'}: {r[k]}")
+            r[k] = new
+        if r == before:
             continue
-        old = r.get("title", "")
-        r["title"] = meta["title"]
-        if has_cjk(meta.get("author")) and not has_cjk(r.get("author")):
-            r["notes"] = "; ".join(x for x in (r.get("notes"), f"author in English: {r.get('author')}") if x)
-            r["author"] = meta["author"]
-        if old:
-            r["notes"] = "; ".join(x for x in (r.get("notes"), f"English title: {old}") if x)
-        if cfg.market_providers and r.get("market_match") not in ("exact", "manual"):
+        if notes:
+            r["notes"] = "; ".join(x for x in [r.get("notes")] + notes if x)
+        src = [x for x in (r.get("book_source") or "").split("+") if x]
+        r["book_source"] = "+".join(dict.fromkeys(src + [x for x in (meta.get("source") or "").split("+") if x]))
+        if r["title"] != before.get("title") and cfg.market_providers and \
+                r.get("market_match") not in ("exact", "manual"):
             forget_market(r)
             apply_market(r, cfg)
         refresh_status(r, cfg)

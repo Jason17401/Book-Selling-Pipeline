@@ -7,7 +7,7 @@ upload (大量上傳) instead - no robot ever logs into Seller Center:
     1. reads any Shopee files waiting in data/listings/shopee/import (the order report, and/or a product list) and
        updates what was listed / ordered / sold ('Read Shopee report...' reads a file you choose);
     2. every product that is 'ready' (all its books checked) gets its photos (data/listings/photos/<product code>/
-       01.jpg ..., put online when PHOTO_HOST is set up) and a row in ONE upload file:
+       01.jpg ..., put online on ImgBB when IMGBB_API_KEY is set) and a row in ONE upload file:
        data/listings/shopee/uploads/shopee_upload_<date-time>.xlsx, filled into Shopee's own template (the Excel file
        in data/listings/shopee/template/).
   YOU then: Seller Center -> 我的商品 -> 新增商品 -> 大量上傳 -> upload that file. The products wait under 尚未刊登 (not
@@ -282,11 +282,11 @@ def fill_upload(cfg: Config, items: list, out: Path, template: Path, category: s
 
 
 # ---- photos online (optional) --------------------------------------------------------------------
-def upload_images(cfg: Config, code: str, paths: list, client=None, http=None) -> list:
-    """The photos' links (PHOTO_HOST: ImgBB or an S3 / Cloudflare R2 bucket - pipeline/apps/photohost.py), uploaded
-    first. No photo host set up: no links (you add the photos by hand)."""
+def upload_images(cfg: Config, code: str, paths: list, http=None) -> list:
+    """The photos' links on ImgBB (pipeline/apps/photohost.py), uploaded first. No IMGBB_API_KEY: no links (you add
+    the photos by hand)."""
     from .photohost import put_online
-    return put_online(cfg, code, paths, client=client, http=http)
+    return put_online(cfg, code, paths, http=http)
 
 
 # ---- links -------------------------------------------------------------------------------------
@@ -357,7 +357,7 @@ def undo_plain_exports(cfg: Config) -> list:
     return notes
 
 
-def export(cfg: Config, redo=(), client=None, http=None) -> dict:
+def export(cfg: Config, redo=(), http=None) -> dict:
     """Make the upload file for every product that is ready and not on Shopee yet (and the products in `redo` again).
     Returns {"file", "made": [codes], "drafts": [(code, why)], "notes": [...], "photos": folder}."""
     redo = set(redo or ())
@@ -397,7 +397,7 @@ def export(cfg: Config, redo=(), client=None, http=None) -> dict:
             continue
         paths = make_product_images(s, group, cfg, cfg.photos_dir / code)
         try:
-            urls = upload_images(cfg, code, paths, client, http)
+            urls = upload_images(cfg, code, paths, http)
         except PhotoHostError as exc:
             res["notes"].append(f"{code}: photos not put online ({exc}) - add them by hand when you publish")
             urls = []
@@ -716,7 +716,7 @@ def import_files(cfg: Config) -> list:
                   and not p.name.startswith("~$"))
 
 
-def run(cfg: Config, files=None, do_export: bool = True, redo=(), client=None) -> dict:
+def run(cfg: Config, files=None, do_export: bool = True, redo=(), http=None) -> dict:
     """1. read Shopee's files (given, or everything in data/listings/shopee/import - moved to import/done after),
     2. make the upload file for the ready products. Returns {"sync": ..., "export": ..., "text": [lines to show]}."""
     cfg.shopee_import.mkdir(parents=True, exist_ok=True)
@@ -736,7 +736,7 @@ def run(cfg: Config, files=None, do_export: bool = True, redo=(), client=None) -
             for f in res["read"]:
                 shutil.move(str(f), str(done / f"{time.strftime('%Y%m%d-%H%M%S')}_{Path(f).name}"))
     if do_export:
-        res = out["export"] = export(cfg, redo=redo, client=client)
+        res = out["export"] = export(cfg, redo=redo, http=http)
         if res["file"]:
             t.append(f"Upload file for {len(res['made'])} product(s): {res['file']}")
             t += [f"  {c}" for c in res["made"]]

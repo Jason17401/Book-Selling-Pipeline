@@ -29,14 +29,17 @@ is batch + set id, e.g. `20261008-153012-S01`; a book's is its sku). A **listing
 ## How books and prices are found
 
 **Book details** (title, author, publisher, year, pages, genre). Taiwanese ISBNs (978-957, 978-986, 978-626) are
-asked, in order (`BOOK_PROVIDERS_TW`): **Google Books → NCL → eslite → books.com.tw → Open Library**; other ISBNs:
-Open Library → Google Books → ISBNdb. Later sources only fill what is still empty, and the search stops once title,
-author, publisher, year and genre are known. For Taiwanese books the **Chinese** title and genre are always preferred
-over English ones, so a book Google only knows in English is looked up further. Every answer is remembered in
-`data\cache`, so processing a book again costs nothing.
+asked, in order (`BOOK_PROVIDERS_TW`): **NCL → eslite → books.com.tw → Google Books → Open Library** - the
+Chinese sources first; other ISBNs: Open Library → Google Books. Later sources only fill what is still empty, and the
+search stops once title, author, publisher, year and genre are known. For Taiwanese books the **Chinese** title,
+author, publisher and genre are always preferred over English ones (Google often only knows a translated book in
+English), so the search goes on until they are Chinese. Every answer is remembered in `data\cache`, so processing a
+book again costs nothing - except when a source could not be reached: that is not remembered, so it is asked again.
 
-- **NCL** (國家圖書館 全國新書資訊網, Taiwan's ISBN agency) is searched by ISBN in its catalogue. When the title in the
-  result is a link, the full record behind it gives the registered price (定價) and the subject heading (主題標題).
+- **NCL** (國家圖書館 全國新書資訊網, Taiwan's ISBN agency) is searched by ISBN in its catalogue (it keeps each
+  search in a session, so its search page is opened first). When the title in the result is a link, the full record
+  behind it gives the registered price (定價) and the subject heading (主題標題). A search that finds nothing is
+  saved in `data\cache\debug` - send it if NCL misses a book you can find on its site.
 - **Genre** is stored as *overarching > most specific*, e.g. `童書 > 冒險／驚悚小說`: from NCL's subject heading,
   eslite's category levels, books.com.tw's 本書分類 / breadcrumb, or Google's category. Navigation steps that are not
   genres (首頁, 中文書, the book's own title ...) are left out.
@@ -46,7 +49,10 @@ over English ones, so a book Google only knows in English is looked up further. 
 1. the small **price barcode** printed next to the ISBN barcode, read from your back photo (free, instant)
 2. **NCL** - the price the publisher registered (finds out-of-print books)
 3. the ISBN in eslite's and books.com.tw's own search
-4. a web search for the ISBN, e.g. `9789574760190 site:eslite.com` - only with a Tavily / LangSearch key
+4. a web search for the ISBN on eslite.com and books.com.tw - first the ISBN alone on both shops (like Google's
+   `9789574760190 (site:eslite.com OR site:books.com.tw)`), then `9789574760190 site:eslite.com` and
+   `eslite 9789574760190` - only with a Tavily / LangSearch key. eslite's own search leaves out books that are not in
+   stock, so this is often how their product page (and its 定價) is found
 5. the title in the shops' search → the same book in **another printed edition** (same title and author, Taiwanese
    edition, never a boxed set or another volume)
 6. one web search for title + author
@@ -82,7 +88,8 @@ Settings that no longer exist are simply ignored (`SET_SPLIT`, `BACK_ROTATE`, `P
 `BRAVE_API_KEY`, `MARKET_EBOOK`). If your `.env` was made from an older version, check these - your old values
 override the new defaults:
 
-- `BOOK_PROVIDERS_TW=google,ncl,eslite,books_tw,openlibrary`
+- `BOOK_PROVIDERS_TW=ncl,eslite,books_tw,google,openlibrary` (the old default order `google,ncl,...` is switched to
+  this one automatically)
 - `LOOKUP_STOP_WHEN=title,author,publisher,year,genre`
 - `MARKET_PROVIDERS=barcode,ncl,eslite,books_tw`
 - `SET_DISCOUNT=20%` (older `.env` files say 0) and `SHOPEE_CATEGORY_NAME=其他書籍` (older ones say 二手書, which
@@ -90,8 +97,8 @@ override the new defaults:
 - `SET_WEIGHT_PER_BOOK_G` is gone (no weight is sent to Shopee any more) - delete the line. A product an older
   version put in a plain sheet (made without the template) goes back to **ready** and into the next upload file by
   itself.
-- `SHOPEE_TEMPLATE` should be blank now (the template lives in `data\listings\shopee\template\`, any name). New
-  optional photo settings: `PHOTO_HOST`, `IMGBB_API_KEY` ([SETUP.md step 7](SETUP.md#7-photo-links-photos-online-automatically)).
+- `SHOPEE_TEMPLATE` should be blank now (the template lives in `data\listings\shopee\template\`, any name). Photo links:
+  `IMGBB_API_KEY` ([SETUP.md step 7](SETUP.md#7-photo-links-photos-online-automatically)).
 
 **"Sets" became "products".** What you sell is now called a *product* (a set of books - later also a single book), so
 the first run after this update converts, once and automatically:
@@ -105,11 +112,34 @@ the first run after this update converts, once and automatically:
 The commands `sets` / `set-status` still work as `products` / `product-status`; the review window's button is
 **Sell products** (`Ctrl+L`).
 
-**New in this version:** a set can be sold **per book** - review window → the Whole set box → **Sell this set: Each
+**New in this version:** the market-price web search first looks for the ISBN alone on eslite.com and books.com.tw
+together (like the Google search the review window opens), with Tavily's more thorough search; a web search that could
+not be made (no internet, quota) is reported and no longer remembered as "not found"; **Find** in the review window
+always searches again; and when no price is found, what was tried is saved in `data\cache\debug\..._market_<isbn>.html`.
+An older `.env` with `WEB_QUERIES=site,shop` gets the new order `isbn,site,shop` automatically.
+
+**Earlier:** book details of Taiwanese books come from the **Chinese sources first** (NCL → eslite →
+books.com.tw, then Google); NCL works again (it now needs a session first - before, every search failed and NCL was
+skipped for the rest of the run); a source that could not be reached is no longer remembered as "not found"; and
+Chinese author / publisher names replace English ones. To fix books already saved with English or missing details:
+`python -m pipeline titles` (books not yet listed).
+
+Also earlier: the condition grades follow TAAZE's own definitions (A-E): `new` 全新, `as_new` 近全新,
+`good` 良好, `fair` 普通, `poor` 差強人意 ([DATA_AND_STATUSES.md](DATA_AND_STATUSES.md#condition-grades)). `like_new`
+became `as_new` - books, captions ("like new" still works) and `DEFAULT_CONDITION=like_new` in an older `.env` are
+converted automatically.
+
+Also earlier: sets are **8 books in a 2 x 4 grid** by default (`SET_SIZE=8`, `GRID=2x4`); photos go online
+on **ImgBB only** (`IMGBB_API_KEY`) - the Cloudflare R2 / S3 option is gone; and **ISBNdb** is no longer a book source.
+Old lines in your `.env` that can go: `PHOTO_HOST`, `IMAGE_PUBLIC_URL`, `S3_ENDPOINT_URL`, `S3_BUCKET`,
+`S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `ISBNDB_API_KEY` (they are ignored), and `isbndb` in `BOOK_PROVIDERS`
+(skipped). The keys still used: `GOOGLE_BOOKS_API_KEY`, `TAVILY_API_KEY`, `LANGSEARCH_API_KEY`, `IMGBB_API_KEY`.
+
+Also earlier: a set can be sold **per book** - review window → the Whole set box → **Sell this set: Each
 book on its own**; Sell products then shows one product per book (title = the book's title, its own price, 2 photos:
 front and back). Only for the sets you choose; the default stays one product per set.
 
-**Earlier:** `setup.bat` does the whole install (no more typing the commands); Sell products has
+Also earlier: `setup.bat` does the whole install (no more typing the commands); Sell products has
 **Quantity** - in stock (庫存) and minimum purchase (最低購買數量), both 1 by default - and the automatic title is now
 simply `【<code>】二手書8本一套`. Products not yet listed get the new title unless you had typed your own.
 

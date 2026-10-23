@@ -14,7 +14,7 @@ def main() -> None:
     sub = ap.add_subparsers(dest="cmd", required=True)
     p = sub.add_parser("ingest", help="decode barcodes in data/inbox, look up metadata, append to books.csv")
     p.add_argument("--expect", type=int, help="total number of books you photographed (sanity check)")
-    p.add_argument("--grid", help="rows x cols of the books on the front photo, e.g. 2x5 (default GRID in .env)")
+    p.add_argument("--grid", help="rows x cols of the books on the front photo, e.g. 2x4 (default GRID in .env)")
     p.add_argument("--rotate", type=int, choices=[0, 90, 180, 270], help="degrees clockwise to turn the front photo upright")
     p.add_argument("--set-size", type=int, help="books per set (default SET_SIZE in .env)")
     sub.add_parser("validate", help="re-check every book and set its status (see DATA_AND_STATUSES.md)")
@@ -42,8 +42,8 @@ def main() -> None:
     p.add_argument("--redo", action="store_true", help="also cut again the covers already cut (e.g. after an update "
                                                        "that cuts them better); listed/sold books are left alone")
     sub.add_parser("genres", help="look up the genre of books saved before genres existed (or still without one)")
-    sub.add_parser("titles", help="Taiwanese books saved with an English title: get the Chinese title (and redo the "
-                                  "market price if it was not an exact match)")
+    sub.add_parser("titles", help="Taiwanese books saved with English (or missing) title / author / publisher: get "
+                                  "the Chinese ones (and redo the market price if it was not an exact match)")
     p = sub.add_parser("market", help="find the price of a NEW copy (eslite / books.com.tw / NCL) and fill empty prices")
     p.add_argument("isbn", nargs="?", help="just show it for one ISBN (nothing saved)")
     p.add_argument("--title", default="", help="with an ISBN: title to search by when the ISBN search finds nothing")
@@ -293,9 +293,9 @@ def main() -> None:
                     r.update(fixed[r["sku"]])
         store.update_rows(cfg.csv_path, apply)
         for r in fixed.values():
-            print(f"{r['sku']}  {r['isbn13']}  -> {r['title']}   market: {r.get('market_price') or '-'} "
+            print(f"{r['sku']}  {r['isbn13']}  -> {r['title']} / {r.get('author') or '-'} / {r.get('publisher') or '-'}   market: {r.get('market_price') or '-'} "
                   f"{r.get('market_currency', '')} ({r.get('market_match') or 'not found'})")
-        print(f"{len(fixed)} title(s) changed to Chinese")
+        print(f"{len(fixed)} book(s) now have their Chinese details")
     elif a.cmd == "market":
         import logging
         logging.basicConfig(level=logging.WARNING, format="%(message)s")

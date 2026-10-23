@@ -51,7 +51,7 @@ def test_events_cover_every_book_and_both_lookups(tmp_path):
     assert done[3]["status"] == "needs_manual" and done[3]["reason"] == "no book source found this ISBN"
     assert done[1]["status"] == "enriched" and done[1]["errors"] == "price"     # no market price -> price to fill
     rows = store.read_rows(tmp_path / "data" / "books.csv")
-    assert {r["condition"] for r in rows} == {"like_new"}                       # the default condition
+    assert {r["condition"] for r in rows} == {"as_new"}                       # the default condition
 
 
 def test_terminal_display_plain_keeps_one_line_per_result(tmp_path):

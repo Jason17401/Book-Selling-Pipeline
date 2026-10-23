@@ -58,7 +58,7 @@ def cfg(tmp_path):
     photos = {"front_photo": str(front), "back_photo": str(barcode)}
     store.write_rows(c.csv_path, [
         {"sku": "b-S01-05", "batch": "b", "set_id": "S01", "position": "5", "isbn13": TW_ISBNS[4], "title": "Done",
-         "author": "A", "condition": "like_new", "price": "5", "currency": "NZD", "status": "validated", **photos},
+         "author": "A", "condition": "as_new", "price": "5", "currency": "NZD", "status": "validated", **photos},
         {"sku": "b-S01-06", "batch": "b", "set_id": "S01", "position": "6", "status": "needs_manual",
          "created_at": "keep-me", **photos},
         {"sku": "b-S01-07", "batch": "b", "set_id": "S01", "position": "7", "isbn13": TW_ISBNS[6], "title": "T7",
@@ -115,7 +115,7 @@ def test_fill_whole_set(gui, cfg):
     rows = {r["sku"]: r for r in store.read_rows(cfg.csv_path)}
     assert rows["b-S01-06"]["condition"] == "fair" and rows["b-S01-06"]["price"] == "4"
     assert rows["b-S01-06"]["currency"] == "TWD" and rows["b-S01-07"]["price"] == "abc"   # filled only blanks
-    assert rows["b-S01-05"]["condition"] == "like_new" and rows["b-S01-05"]["price"] == "5"
+    assert rows["b-S01-05"]["condition"] == "as_new" and rows["b-S01-05"]["price"] == "5"
 
 
 def test_condition_and_price_are_required(gui, cfg):
@@ -130,7 +130,7 @@ def test_condition_and_price_are_required(gui, cfg):
     row = {r["sku"]: r for r in store.read_rows(cfg.csv_path)}["b-S01-06"]
     assert row["status"] == "enriched" and "condition" in row["errors"] and "price" in row["errors"]
     assert len(w.book_items()) == 2                                  # still listed: price + condition to fill
-    ed.condition.setCurrentIndex(ed.condition.findData("like_new"))
+    ed.condition.setCurrentIndex(ed.condition.findData("as_new"))
     ed.fields["price"].setText("120")
     ed.fields["currency"].setText("TWD")
     ed._changed()

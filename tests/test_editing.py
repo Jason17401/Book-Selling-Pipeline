@@ -18,7 +18,7 @@ def cfg(tmp_path):
     book_back(TW_ISBNS[5], size=(300, 400)).save(barcode)
     rows = [
         {"sku": "b-S01-05", "batch": "b", "set_id": "S01", "position": "5", "isbn13": TW_ISBNS[4], "title": "Done",
-         "author": "A", "condition": "like_new", "price": "5", "currency": "NZD", "front_photo": str(front),
+         "author": "A", "condition": "as_new", "price": "5", "currency": "NZD", "front_photo": str(front),
          "back_photo": str(barcode), "status": "validated"},
         {"sku": "b-S01-06", "batch": "b", "set_id": "S01", "position": "6", "front_photo": str(front),
          "back_photo": str(barcode), "status": "needs_manual", "created_at": "keep-me"},
@@ -42,7 +42,7 @@ def test_condition_and_price_are_required(cfg):
     assert r["isbn13"] == "9789861371955" and r["status"] == "enriched"
     assert {i["field"] for i in r["issues"]} == {"condition", "price"}
     assert "no market price was found" in " ".join(i["msg"] for i in r["issues"])
-    r = editing.save_row(cfg, "b-S01-06", {"condition": "like_new", "price": "150", "currency": "TWD"})
+    r = editing.save_row(cfg, "b-S01-06", {"condition": "as_new", "price": "150", "currency": "TWD"})
     assert r["status"] == "validated" and not r["issues"]
     rows = {x["sku"]: x for x in store.read_rows(cfg.csv_path)}
     assert rows["b-S01-06"]["created_at"] == "keep-me" and "manual" in rows["b-S01-06"]["book_source"]
@@ -74,7 +74,7 @@ def test_fill_set_only_fills_blanks(cfg):
     editing.save_row(cfg, "b-S01-06", {"condition": "good"})
     assert editing.fill_set(cfg, "b", "S01", "acceptable", "150", "twd") == 1   # only book 6's empty price
     rows = {x["sku"]: x for x in store.read_rows(cfg.csv_path)}
-    assert rows["b-S01-06"]["condition"] == "good" and rows["b-S01-05"]["condition"] == "like_new"
+    assert rows["b-S01-06"]["condition"] == "good" and rows["b-S01-05"]["condition"] == "as_new"
     assert rows["b-S01-06"]["price"] == "150" and rows["b-S01-06"]["currency"] == "TWD"
     assert rows["b-S01-05"]["price"] == "5" and rows["b-S01-05"]["currency"] == "NZD"
 

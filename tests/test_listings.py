@@ -55,6 +55,6 @@ def test_incomplete_set_is_skipped(tmp_path):
 def test_caption_parsing():
     assert parse_caption("good 5") == ("good", "5", "TWD")
     assert parse_caption("good 5", "NZD") == ("good", "5", "NZD")
-    assert parse_caption("like new 150 NTD", "NZD") == ("like_new", "150", "TWD")
+    assert parse_caption("like new 150 NTD", "NZD") == ("as_new", "150", "TWD")
     assert parse_caption("front") == ("", "", "")
     assert parse_caption("poor") == ("poor", "", "")

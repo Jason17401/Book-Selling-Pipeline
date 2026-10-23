@@ -1,6 +1,6 @@
 """Per set: ONE photo of all the front covers, then ONE back photo (its back cover, with the barcode) per book.
 
-    photo 1      : front covers of the whole set (GRID, e.g. 2x5)
+    photo 1      : front covers of the whole set (GRID, e.g. 2x4)
     photos 2..11 : back photo of book 1, 2, ... 10 - top row left to right, then the next row left to right
 
 Each book in books.csv keeps: front_photo (its OWN cover, cut out of the set's front photo - see segment.py),

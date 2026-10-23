@@ -58,7 +58,7 @@ def cfg(tmp_path):
         book_back(TW_ISBNS[i], size=(300, 400)).save(bc)
         rows.append({"sku": f"{CODE}-{i + 1:02d}", "batch": "20261008-153012", "set_id": "S01",
                      "position": str(i + 1), "isbn13": TW_ISBNS[i], "title": TITLES[i], "author": "瑪麗．波．奧斯本",
-                     "publisher": "小天下", "condition": "like_new", "price": "100", "currency": "TWD",
+                     "publisher": "小天下", "condition": "as_new", "price": "100", "currency": "TWD",
                      "market_price": "250", "market_currency": "TWD", "set_photo": str(front),
                      "front_photo": str(front), "back_photo": str(bc), "status": "validated"})
     rows[3]["status"] = "to_check"                    # one book not checked yet
@@ -233,24 +233,6 @@ def test_an_old_plain_sheet_export_is_made_again(cfg):
     assert res["made"] == [CODE] and any("not Shopee's template" in n for n in res["notes"])
     assert the_listing(cfg)["export_file"] == str(res["file"]) and the_set(cfg)["status"] == "listed"
     assert names
-
-
-def test_photo_links_when_a_bucket_is_set(cfg):
-    names = make_template(cfg.template_path)
-    check_all(cfg)
-    cfg.image_public_url, cfg.s3_bucket = "https://pub-123.r2.dev", "books"
-    sent = []
-
-    class Bucket:
-        def upload_file(self, src, bucket, key, ExtraArgs=None):
-            sent.append((bucket, key, ExtraArgs["ContentType"]))
-    res = shopee.export(cfg, client=Bucket())
-    assert sent[0] == ("books", f"{CODE}/01.jpg", "image/jpeg") and len(sent) == 9
-    ws = openpyxl.load_workbook(res["file"])["Template"]
-    row = {names[j]: ws.cell(6, j + 1).value for j in range(len(names))}
-    assert row["主商品圖片"] == f"https://pub-123.r2.dev/{CODE}/01.jpg"
-    assert row["商品圖片 1"].endswith("/02.jpg") and row["商品圖片 2"].endswith("/03.jpg")
-    assert the_listing(cfg)["errors"] == ""
 
 
 def order_report(path, rows):

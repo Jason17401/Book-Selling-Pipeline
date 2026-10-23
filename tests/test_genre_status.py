@@ -47,9 +47,13 @@ def test_taiwanese_book_keeps_asking_for_a_chinese_genre(tmp_path):
 
 
 def test_condition_grades_and_captions():
-    assert CONDITIONS == ["new", "like_new", "good", "fair", "poor"]           # TAAZE's five grades, best first
-    assert CONDITION_ZH["like_new"] == "近全新" and Config().default_condition == "like_new"   # second best
-    assert parse_caption("近全新 150") == ("like_new", "150", "TWD")
+    assert CONDITIONS == ["new", "as_new", "good", "fair", "poor"]           # TAAZE's five grades, best first
+    assert CONDITION_ZH["as_new"] == "近全新" and Config().default_condition == "as_new"   # second best
+    assert parse_caption("近全新 150") == ("as_new", "150", "TWD")
+    assert parse_caption("as new 90") == ("as_new", "90", "TWD") and parse_caption("like new")[0] == "as_new"
+    from pipeline.core.validate import CONDITION_GRADES
+    assert [g[3] for g in CONDITION_GRADES] == ["A", "B", "C", "D", "E"]                # TAAZE's letters
+    assert "膠膜未拆" in CONDITION_GRADES[0][5] and "印刷褪色" in CONDITION_GRADES[4][5]
     assert parse_caption("良好120") == ("good", "120", "TWD")
     assert parse_caption("全新") == ("new", "", "")
     assert parse_caption("acceptable 5 NZD") == ("fair", "5", "NZD")
@@ -62,7 +66,7 @@ def test_complete_books_wait_for_a_quick_check(tmp_path):
     photo = tmp_path / "p.jpg"
     photo.write_bytes(b"x")
     cfg = Config(data_dir=tmp_path)
-    r = {"isbn13": "9789861371955", "title": "T", "author": "A", "condition": "like_new", "price": "120",
+    r = {"isbn13": "9789861371955", "title": "T", "author": "A", "condition": "as_new", "price": "120",
          "currency": "TWD", "back_photo": str(photo), "front_photo": str(photo)}
     assert refresh_status(r, cfg) == [] and r["status"] == "to_check"         # processed: complete, not yet checked
     refresh_status(r, cfg)
@@ -74,3 +78,13 @@ def test_complete_books_wait_for_a_quick_check(tmp_path):
     r["price"] = ""
     refresh_status(r, cfg)
     assert r["status"] == "enriched"                                          # something missing again
+
+
+def test_older_condition_codes_are_converted(tmp_path, monkeypatch):
+    from pipeline.core import store
+    p = tmp_path / "books.csv"
+    store.write_rows(p, [{"sku": "x-S01-01", "condition": "like_new"}, {"sku": "x-S01-02", "condition": "acceptable"}])
+    assert [r["condition"] for r in store.read_rows(p)] == ["as_new", "fair"]
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("DEFAULT_CONDITION", "like_new")                 # an older .env
+    assert Config.from_env().default_condition == "as_new"

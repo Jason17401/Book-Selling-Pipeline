@@ -27,7 +27,7 @@ Edit the files with the review window rather than Excel - Excel turns ISBNs into
 
 | Column | Meaning |
 |---|---|
-| `sku`, `batch`, `set_id`, `position` | unique id; when it was processed; set (S01, S02 ...); number in the set (1-10) |
+| `sku`, `batch`, `set_id`, `position` | unique id; when it was processed; set (S01, S02 ...); number in the set (1-8 by default) |
 | `isbn13`, `title`, `author`, `publisher`, `year`, `pages` | the book |
 | `genre` | the book's genres, broadest first, separated by ` > `: e.g. `童書 > 冒險／驚悚小說` (one chip each in the review window). Only `>`, `\|` and `;` separate genres - never `/` or `／` (part of names like 冒險／驚悚小說), commas (`Body, Mind & Spirit` is one genre) or spaces |
 | `condition` | one of the five grades below (required) |
@@ -49,19 +49,19 @@ sold follows its product.
 
 ### Condition grades
 
-The five grades used by [TAAZE 讀冊生活](https://www.taaze.tw/), Taiwan's largest used-book marketplace, so Taiwanese
-buyers know them. Listings show the Chinese name. The descriptions are a practical guide in the spirit of those
-grades (TAAZE's staff judge each book; they don't publish exact rules).
+The five used-book grades of [TAAZE 讀冊生活](https://www.taaze.tw/), Taiwan's largest used-book marketplace, so
+Taiwanese buyers know them - with TAAZE's own definitions (書況標定, grades A-E). `books.csv` stores the English code;
+the review window shows both names, and listings show the Chinese one (書況：近全新).
 
-| Grade | Code | Means |
-|---|---|---|
-| **全新** New | `new` | Unread. No marks, wear or yellowing; looks as it did in the shop. |
-| **近全新** Like new *(default)* | `like_new` | Read carefully once or twice. No writing or highlighting; at most tiny shelf wear on edges or corners. |
-| **良好** Good | `good` | Clearly read, but clean and complete: light wear on cover/corners or slight yellowing; no or very little writing. |
-| **普通** Fair | `fair` | Obvious wear: creases, yellowing, foxing (書斑), some writing or highlighting, a name on the first page. All pages present and readable. |
-| **差強人意** Poor | `poor` | Heavy wear: lots of writing, water marks, loose or damaged pages or cover. Readable, priced as such. |
+| TAAZE | Grade | Code | Means (TAAZE's definition) |
+|---|---|---|---|
+| A | **全新** New | `new` | Still in the supplier's original shrink wrap, unopened; no defects. 原供應商膠膜未拆，無瑕疵。 |
+| B | **近全新** As new *(default)* | `as_new` | Not shrink-wrapped; signs of reading barely noticeable - like a book on display in a bookshop. 未包膜，翻閱痕跡不明顯，如實體賣場陳列販售之書籍。 |
+| C | **良好** Good | `good` | Signs of use, such as folded corners or knocks; not as clean and white as a new book. 有使用痕跡，如摺角、碰撞等，不如新書潔白。 |
+| D | **普通** Fair | `fair` | Obvious signs of use, or yellowing / brown or black spots. 有明顯使用痕跡或黃褐色、黑斑等。 |
+| E | **差強人意** Poor | `poor` | Faded or blurred printing, or worse. 印刷褪色、模糊或其它更糟之書況。 |
 
-Books saved earlier as `acceptable` become `fair` automatically.
+Books saved earlier as `like_new` become `as_new`, and `acceptable` becomes `fair`, automatically.
 
 ### Book statuses
 

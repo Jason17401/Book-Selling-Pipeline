@@ -114,12 +114,12 @@ Put them in `.env`. Everything works without them; you just find fewer books and
 
 ## 5. Photograph your first set
 
-1. Lay the books in a grid: by default **2 rows of 5** (`GRID=2x5`, `SET_SIZE=10`). Book 1 is top-left, then left to
+1. Lay the books in a grid: by default **2 rows of 4** (`GRID=2x4`, `SET_SIZE=8`). Book 1 is top-left, then left to
    right along the row, then the next row. Leave a small gap between books if you can, on a plain surface that
    contrasts with the covers - each book's cover picture is cut out of this photo automatically.
 2. **Photo 1:** all the front covers together, in landscape, straight from above. Send it **as a File** (in Telegram:
    paperclip → File) for sharp cover pictures - a normal Telegram photo is shrunk to about 1280 px.
-3. **Photos 2-11:** the back cover of each book with its barcode, in book order 1 → 10. Fill the frame, keep the
+3. **Photos 2-9:** the back cover of each book with its barcode, in book order 1 → 8. Fill the frame, keep the
    barcode sharp and without glare. A normal photo is plenty.
 
 Send them as described in [DAILY_USE.md](DAILY_USE.md#2-send-a-set-in-telegram), then look at the **review sheet**
@@ -182,41 +182,19 @@ in Seller Center (about a minute), then check and publish there. Everything befo
 
 ## 7. Photo links: photos online automatically
 
-Shopee's bulk upload takes photos only as **web links** (a direct link to a `.jpg`). With a photo host set up,
-**Make Shopee upload file** (in Sell products) puts each product's photos online by itself and writes their links into the upload file - no dragging
-photos into Seller Center. Each photo is uploaded once: its link is remembered in
-`data\listings\photos\<product code>\links.json` and reused until the photo changes. Shopee copies the photos when it
-reads the upload file, so the links only need to work until the product is published - but both options below keep
-them for good.
+Shopee's bulk upload takes photos only as **web links** (a direct link to a `.jpg`). The pipeline puts them on
+**[ImgBB](https://imgbb.com)**, a free image host with an upload API: every photo gets a permanent direct link
+(`https://i.ibb.co/.../01.jpg`). **Make Shopee upload file** (in Sell products) then puts each product's photos online
+by itself and writes their links into the upload file - no dragging photos into Seller Center. Each photo is uploaded
+once: its link is remembered in `data\listings\photos\<product code>\links.json` and reused until the photo changes.
 
-**Google Drive won't do:** its share links open a Drive page, not the picture, and the old "direct" Drive links
-(`uc?export=view`) have been blocked for other sites since early 2024 - Shopee can't fetch them.
-
-### Option A - ImgBB (recommended: free, no card, 5 minutes)
-
-[ImgBB](https://imgbb.com) is a free image host with an upload API: every photo gets a permanent direct link
-(`https://i.ibb.co/.../01.jpg`). Uploads are free and kept unless you delete them (or set an expiry, which the
-pipeline doesn't).
-
-1. Sign up at [imgbb.com](https://imgbb.com) (free).
+1. Sign up at [imgbb.com](https://imgbb.com) (free, no card).
 2. Open [api.imgbb.com](https://api.imgbb.com) while signed in → **Get API key** → copy it.
-3. In `.env`: `IMGBB_API_KEY=<your key>` (and leave `PHOTO_HOST=` blank, or write `PHOTO_HOST=imgbb`).
+3. In `.env`: `IMGBB_API_KEY=<your key>`
 
-That's all - the next **Make Shopee upload file** puts the photos online. The key travels inside the upload request, never in a link.
-Anyone with a photo's link can see it (as on Shopee itself).
-
-### Option B - Cloudflare R2 (more control; needs a card to switch on)
-
-A bucket of your own: 10 GB free, no fees for downloads. Cloudflare asks for a card or PayPal to switch R2 on, even on
-the free plan.
-
-1. [dash.cloudflare.com](https://dash.cloudflare.com) → R2 → create a bucket (e.g. `books`) → Settings → **Public
-   access: allow r2.dev subdomain**. Note the public URL (`https://pub-....r2.dev`). (The `r2.dev` address is
-   rate-limited - fine here, since Shopee copies each photo once.)
-2. R2 → **Manage API tokens** → create a token with **Object Read & Write** for that bucket. Note the access key id,
-   secret and the S3 endpoint (`https://<account id>.r2.cloudflarestorage.com`).
-3. In `.env`: `PHOTO_HOST=s3`, `IMAGE_PUBLIC_URL=https://pub-....r2.dev`, `S3_ENDPOINT_URL=...`, `S3_BUCKET=books`,
-   `S3_ACCESS_KEY_ID=...`, `S3_SECRET_ACCESS_KEY=...`, and install the uploader once: `python -m pip install boto3`
+That's all. The key travels inside the upload request, never in a link. Uploads are kept unless you delete them;
+anyone with a photo's link can see it (as on Shopee itself). Without a key, no links are made and you add the photos
+by hand (**Open its photos** in Sell products).
 
 If a photo can't be put online (no internet, wrong key), the upload file is still made - that product just has no photo
 links, and the result message says why.

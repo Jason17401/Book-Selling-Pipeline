@@ -1,4 +1,4 @@
-"""The front photo of a set is a GRID of books (GRID=rows x cols, e.g. 2x5). Book N is the N-th cell counting along the
+"""The front photo of a set is a GRID of books (GRID=rows x cols, e.g. 2x4). Book N is the N-th cell counting along the
 top row left to right, then the next row. This module does the geometry, draws numbers on the photo, and makes the
 review sheet. Nothing here is stored in books.csv: crops are made on the fly from the front photo when needed."""
 from __future__ import annotations

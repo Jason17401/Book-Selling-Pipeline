@@ -4,7 +4,6 @@ Providers (names for BOOK_PROVIDERS / BOOK_PROVIDERS_TW in .env):
   openlibrary         Open Library Books API          free, no key. Identified User-Agent (CONTACT_EMAIL), max ~1 call/s here
   openlibrary_search  Open Library Search API         free, no key. Finds some books the Books API misses
   google              Google Books API v1             GOOGLE_BOOKS_API_KEY; counted against GOOGLE_DAILY_LIMIT per day
-  isbndb              ISBNdb (paid)                   ISBNDB_API_KEY
   eslite              誠品 eslite.com (Taiwan)          unofficial: the JSON search their own website uses
   books_tw            博客來 books.com.tw (Taiwan)      scraping: search page + product page
   ncl                 國家圖書館 全國新書資訊網 (Taiwan)   scraping: ISBN search, few details, last resort
@@ -245,31 +244,6 @@ def from_google(isbn: str, cfg: Config, counter: Optional[net.DailyCounter] = No
     return {}
 
 
-# ---- ISBNdb ------------------------------------------------------------------------------------
-def from_isbndb(isbn: str, cfg: Config) -> dict:
-    """ISBNdb (paid). Example:
-        GET https://api2.isbndb.com/book/9781451648546
-        header: Authorization: <ISBNDB_API_KEY>
-    Reply: {"book": {"title": ..., "title_long": ..., "authors": [...], "publisher": ..., "pages": ..., ...}}
-    """
-    if not cfg.isbndb_key:
-        return {}
-    data = net.request("isbndb", "GET", f"{cfg.isbndb_base}/book/{isbn}",
-                       headers={"Authorization": cfg.isbndb_key, "Accept": "application/json"}, min_interval=1.1)
-    b = (data or {}).get("book") or {}
-    if not b:
-        return {}
-    return {
-        "title": b.get("title_long") or b.get("title", ""),
-        "author": ", ".join(b.get("authors", [])),
-        "publisher": b.get("publisher", ""),
-        "year": _year(b.get("date_published")),
-        "pages": b.get("pages"),
-        "format": b.get("binding", ""),
-        "cover_url": b.get("image", ""),
-    }
-
-
 def _taiwan(name):
     def call(isbn, cfg):
         from . import taiwan
@@ -279,12 +253,12 @@ def _taiwan(name):
 
 
 PROVIDERS: dict = {"openlibrary": from_openlibrary, "openlibrary_search": from_openlibrary_search,
-                   "google": from_google, "isbndb": from_isbndb,
+                   "google": from_google,
                    "eslite": _taiwan("from_eslite"), "books_tw": _taiwan("from_books_tw"), "ncl": _taiwan("from_ncl")}
 
 
 # bump a number when a provider's lookup changes, so old cached answers (especially "not found") are ignored
-PROVIDER_VERSION = {"google": 4, "eslite": 2, "books_tw": 2, "ncl": 2}   # 2026-10: + genre
+PROVIDER_VERSION = {"google": 4, "eslite": 3, "books_tw": 3, "ncl": 3}   # 2026-10: + genre; NCL search session
 
 
 def _cache_name(name: str) -> str:
@@ -322,15 +296,17 @@ def lookup_book(isbn: str, cfg: Config, providers: dict = None, use_cache: bool 
     """Ask the providers in order; later ones only fill blanks. For a TAIWANESE ISBN the Chinese title is wanted:
     Google often only knows the English title of a translated or bilingual book (9789862167557 -> 'A Ghost Tale for
     Christmas Time', really 神奇樹屋44: 狄更斯的耶誕頌), so the search goes on until a source gives a Chinese title
-    (NCL usually does), and that one replaces the English title (and an English-only author name)."""
+    (NCL usually does), and that one replaces the English title (and an English-only author, publisher, genre).
+    That is why the Chinese sources (NCL, eslite, books.com.tw) are asked before Google for Taiwanese ISBNs."""
     result: dict = {}
     used, errors = [], []
     tw = is_taiwan(isbn)
     cache = net.Cache(cfg.cache_dir / "lookups.json", cfg.cache_days, cfg.cache_miss_days)
     for name in providers_for(isbn, cfg):
         if cfg.stop_when and all(result.get(k) for k in cfg.stop_when) and \
-                (not tw or (has_cjk(result.get("title")) and ("genre" not in cfg.stop_when or has_cjk(result.get("genre"))))):
-            break  # everything we need is filled: don't spend more calls / quota
+                (not tw or all(has_cjk(result.get(k)) for k in ("title", "author", "publisher", "genre")
+                               if k == "title" or k in cfg.stop_when)):
+            break  # everything we need is filled (for a Taiwanese book: in Chinese) - no more calls / quota
         if net.blocked(name):
             msg = f"{name}: {net.blocked(name)}"
             if msg not in errors:
@@ -356,7 +332,8 @@ def lookup_book(isbn: str, cfg: Config, providers: dict = None, use_cache: bool 
         for k in FIELDS:
             if got.get(k) and not result.get(k):
                 result[k] = got[k]
-            elif tw and k in ("title", "author", "genre") and has_cjk(got.get(k)) and not has_cjk(result.get(k)):
+            elif tw and k in ("title", "author", "publisher", "genre") and has_cjk(got.get(k)) and \
+                    not has_cjk(result.get(k)):
                 result.setdefault(f"{k}_other", result[k])     # keep the English one for the market search
                 result[k] = got[k]
     result["source"] = "+".join(used)

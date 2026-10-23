@@ -1,7 +1,9 @@
 """Find a shop's product page for an ISBN with a WEB search engine - the same trick as typing
 "eslite 9789869283533" into Google, then opening the top results:
 
-    1. search "9789869283533 site:eslite.com" (then "eslite 9789869283533" if needed; WEB_QUERIES)
+    1. search "9789869283533" on eslite.com + books.com.tw at once - like Google's
+       "9789869283533 (site:eslite.com OR site:books.com.tw)" - then, per shop, "9789869283533 site:eslite.com" and
+       "eslite 9789869283533" if needed (WEB_QUERIES)
     2. take the first 3 results that are pages on that shop
     3. open each one in turn; if the page's ISBN is OURS, read its 定價 (list price) - done
        (eslite: the product's own data via the shop's API; books.com.tw: the product page, or the page text the
@@ -81,24 +83,30 @@ def _all_results(obj) -> list:
 
 
 # what you would type into Google for each shop. WEB_QUERIES picks which forms are tried, in order:
-#   site = "9789574760190 site:eslite.com"   shop = "eslite 9789574760190"
+#   isbn = "9789574760190" on every shop at once   site = "9789574760190 site:eslite.com"   shop = "eslite 9789574760190"
 SHOP_WORD = {"eslite.com": "eslite", "books.com.tw": "books.com.tw"}
 TOP = 3   # results checked per search, like reading the first three Google results
 
 
 def query_for(isbn: str, site: str, form: str = "shop") -> str:
+    if form == "isbn":
+        return isbn
     if form == "site":
         return f"{isbn} site:{site}"
     return f"{SHOP_WORD.get(site, site)} {isbn}"
 
 
-def run_queries(queries: list, sites: list, cfg: Config, top: int = TOP):
+def run_queries(queries: list, sites: list, cfg: Config, top: int = TOP, errors: list = None):
     """Run each query ONCE, on the first engine that works (tavily -> langsearch: the next engine is only
     used when one fails, is used up or refuses the key - never to repeat the same search). Yields, per search, its
     top `top` results that are pages on one of `sites`; results already yielded are skipped. The caller checks each
-    batch and stops as soon as one has the book, so the next query is only spent when needed."""
+    batch and stops as soon as one has the book, so the next query is only spent when needed.
+    A query no engine could run (no internet, all used up ...) is added to `errors` - so the caller does not take
+    "nothing found" for an answer (and does not remember it)."""
     seen = set()
     for q in queries:
+        answered = False
+        failures = []
         for engine in engines(cfg):
             if net.blocked(engine):
                 continue
@@ -108,10 +116,13 @@ def run_queries(queries: list, sites: list, cfg: Config, top: int = TOP):
             except (net.QuotaReached, net.ProviderBlocked) as exc:   # e.g. monthly limit, or a wrong key (401)
                 net.block(engine, str(exc))
                 log.warning("  web search (%s) switched off for this run: %s", engine, exc)
+                failures.append(f"{engine}: {exc}")
                 continue
             except Exception as exc:
                 log.warning("  web search (%s) failed: %s", engine, net.redact(exc))
+                failures.append(f"{engine}: {net.redact(exc)}")
                 continue
+            answered = True
             on_site = [r for r in results if any(site in r["url"] for site in sites)]
             fresh = []
             for r in on_site:
@@ -123,16 +134,23 @@ def run_queries(queries: list, sites: list, cfg: Config, top: int = TOP):
             if fresh:
                 yield fresh
             break          # this query is done - the other engines are not asked the same thing
+        if not answered and errors is not None:
+            why = "; ".join(failures) or "every web search engine is switched off for this run"
+            msg = f"web search \"{q}\" could not be made ({why})"
+            if msg not in errors:
+                errors.append(msg)
 
 
-def searches(isbn: str, site: str, cfg: Config, top: int = TOP):
-    """The ISBN searches for one shop: "<isbn> site:eslite.com", then "eslite <isbn>" (WEB_QUERIES)."""
-    return run_queries([query_for(isbn, site, form) for form in cfg.web_queries], [site], cfg, top)
+def searches(isbn: str, site: str, cfg: Config, top: int = TOP, errors: list = None):
+    """The ISBN searches for one shop: "<isbn> site:eslite.com", then "eslite <isbn>" (WEB_QUERIES; the plain "isbn"
+    form is searched on all shops at once - see search_query)."""
+    return run_queries([query_for(isbn, site, form) for form in cfg.web_queries if form != "isbn"], [site], cfg, top,
+                       errors)
 
 
-def search_query(query: str, sites: list, cfg: Config, top: int = TOP):
-    """One free-text search (e.g. a title + author) limited to the shops' sites."""
-    return run_queries([query], sites, cfg, top)
+def search_query(query: str, sites: list, cfg: Config, top: int = TOP, errors: list = None):
+    """One free-text search (the ISBN alone, or a title + author) limited to the shops' sites."""
+    return run_queries([query], sites, cfg, top, errors)
 
 
 def search(isbn: str, site: str, cfg: Config, top: int = TOP) -> list:
@@ -187,7 +205,7 @@ def _search(engine: str, query: str, sites, cfg: Config, count: int = 10) -> lis
         # so the ISBN and 定價 can be checked even if the shop refuses our own request for the page
         data = net.request("tavily", "POST", TAVILY_URL, min_interval=1.0,
                            json={"query": query, "include_domains": sites, "max_results": count,
-                                 "search_depth": "basic", "include_raw_content": True},
+                                 "search_depth": "advanced", "include_raw_content": True},
                            headers={"Authorization": f"Bearer {cfg.tavily_api_key}",
                                     "Content-Type": "application/json"}) or {}
         return _all_results(data.get("results") or [])

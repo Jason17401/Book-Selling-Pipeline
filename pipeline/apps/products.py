@@ -15,9 +15,9 @@ from ..core import store
 from ..core.config import Config
 from ..photos.grid import numbered, parse_grid, stamp_number  # noqa: F401  (parse_grid re-exported for the CLI)
 
-from ..core.validate import CONDITION_ZH
+from ..core.validate import CONDITION_ZH, OLD_CONDITIONS
 
-COND_LABEL = {**CONDITION_ZH, "acceptable": CONDITION_ZH["fair"]}   # listings are for Taiwanese buyers: 近全新 ...
+COND_LABEL = {**CONDITION_ZH, **{old: CONDITION_ZH[new] for old, new in OLD_CONDITIONS.items()}}  # buyers read 近全新 ...
 
 
 def make_label_sheet(dst, count: int = 10, per_row: int = 5) -> None:
