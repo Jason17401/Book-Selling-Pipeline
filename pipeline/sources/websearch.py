@@ -18,7 +18,7 @@ gets blocked within a few queries. Two official search APIs are supported; a sea
 that works (tavily, then langsearch), only when the shops' own search found nothing; searches are counted per calendar
 month (WEB_SEARCH_MONTHLY_LIMIT) and answers are cached:
 
-  tavily  https://tavily.com - free plan: 1,000 searches a month, NO credit card. Key in TAVILY_API_KEY.
+  tavily  https://tavily.com - free plan: 1,000 credits a month (a search here = 2), NO credit card. TAVILY_API_KEY.
           POST https://api.tavily.com/search   header: Authorization: Bearer <key>
           body: {"query": "eslite 9789869283533", "include_domains": ["eslite.com"], "max_results": 10,
                  "include_raw_content": true}
@@ -30,6 +30,7 @@ month (WEB_SEARCH_MONTHLY_LIMIT) and answers are cached:
 Without any key you can still do it by hand, for free: in the review window press "Search the web" (opens the search
 in your browser), copy the shop's product link and paste it into "Shop link" - the pipeline reads the price from it.
 """
+
 from __future__ import annotations
 
 import logging
@@ -39,6 +40,7 @@ from ..core import net, progress
 from ..core.config import Config
 
 TAVILY_URL = "https://api.tavily.com/search"
+TAVILY_SEARCH_CREDITS = 2  # an "advanced" search (more thorough) costs 2 of the free plan's 1,000 monthly credits
 LANGSEARCH_URL = "https://api.langsearch.com/v1/web-search"
 KEYS = {"tavily": "tavily_api_key", "langsearch": "langsearch_api_key"}
 log = logging.getLogger("pipeline.market")
@@ -70,8 +72,10 @@ def _all_results(obj) -> list:
     if isinstance(obj, dict):
         url = obj.get("url")
         if isinstance(url, str) and url.startswith("http"):
-            text = " ".join(str(obj.get(k) or "") for k in ("raw_content", "content", "summary", "snippet",
-                                                            "description", "extra_snippets"))
+            text = " ".join(
+                str(obj.get(k) or "")
+                for k in ("raw_content", "content", "summary", "snippet", "description", "extra_snippets")
+            )
             out.append({"url": url, "title": str(obj.get("title") or obj.get("name") or ""), "text": text})
         for k, v in obj.items():
             if k != "url":
@@ -83,9 +87,11 @@ def _all_results(obj) -> list:
 
 
 # what you would type into Google for each shop. WEB_QUERIES picks which forms are tried, in order:
-#   isbn = "9789574760190" on every shop at once   site = "9789574760190 site:eslite.com"   shop = "eslite 9789574760190"
+#   isbn = "9789574760190" on every shop at once
+#   site = "9789574760190 site:eslite.com"
+#   shop = "eslite 9789574760190"
 SHOP_WORD = {"eslite.com": "eslite", "books.com.tw": "books.com.tw"}
-TOP = 3   # results checked per search, like reading the first three Google results
+TOP = 3  # results checked per search, like reading the first three Google results
 
 
 def query_for(isbn: str, site: str, form: str = "shop") -> str:
@@ -110,10 +116,10 @@ def run_queries(queries: list, sites: list, cfg: Config, top: int = TOP, errors:
         for engine in engines(cfg):
             if net.blocked(engine):
                 continue
-            progress.step("market", f"web search ({engine}): \"{q}\"")
+            progress.step("market", f'web search ({engine}): "{q}"')
             try:
                 results = _search(engine, q, sites, cfg)
-            except (net.QuotaReached, net.ProviderBlocked) as exc:   # e.g. monthly limit, or a wrong key (401)
+            except (net.QuotaReached, net.ProviderBlocked) as exc:  # e.g. monthly limit, or a wrong key (401)
                 net.block(engine, str(exc))
                 log.warning("  web search (%s) switched off for this run: %s", engine, exc)
                 failures.append(f"{engine}: {exc}")
@@ -129,14 +135,21 @@ def run_queries(queries: list, sites: list, cfg: Config, top: int = TOP, errors:
                 if r["url"] not in seen and len(fresh) < top:
                     seen.add(r["url"])
                     fresh.append(r)
-            log.info('  web search (%s) "%s": %d result(s), %d on %s, checking %d new', engine, q, len(results),
-                     len(on_site), " / ".join(sites), len(fresh))
+            log.info(
+                '  web search (%s) "%s": %d result(s), %d on %s, checking %d new',
+                engine,
+                q,
+                len(results),
+                len(on_site),
+                " / ".join(sites),
+                len(fresh),
+            )
             if fresh:
                 yield fresh
-            break          # this query is done - the other engines are not asked the same thing
+            break  # this query is done - the other engines are not asked the same thing
         if not answered and errors is not None:
             why = "; ".join(failures) or "every web search engine is switched off for this run"
-            msg = f"web search \"{q}\" could not be made ({why})"
+            msg = f'web search "{q}" could not be made ({why})'
             if msg not in errors:
                 errors.append(msg)
 
@@ -144,24 +157,14 @@ def run_queries(queries: list, sites: list, cfg: Config, top: int = TOP, errors:
 def searches(isbn: str, site: str, cfg: Config, top: int = TOP, errors: list = None):
     """The ISBN searches for one shop: "<isbn> site:eslite.com", then "eslite <isbn>" (WEB_QUERIES; the plain "isbn"
     form is searched on all shops at once - see search_query)."""
-    return run_queries([query_for(isbn, site, form) for form in cfg.web_queries if form != "isbn"], [site], cfg, top,
-                       errors)
+    return run_queries(
+        [query_for(isbn, site, form) for form in cfg.web_queries if form != "isbn"], [site], cfg, top, errors
+    )
 
 
 def search_query(query: str, sites: list, cfg: Config, top: int = TOP, errors: list = None):
     """One free-text search (the ISBN alone, or a title + author) limited to the shops' sites."""
     return run_queries([query], sites, cfg, top, errors)
-
-
-def search(isbn: str, site: str, cfg: Config, top: int = TOP) -> list:
-    """The first batch from searches() ([] when web search is off or nothing was found)."""
-    for batch in searches(isbn, site, cfg, top):
-        return batch
-    return []
-
-
-def search_urls(isbn: str, site: str, cfg: Config, top: int = TOP) -> list:
-    return [r["url"] for r in search(isbn, site, cfg, top)]
 
 
 TAVILY_EXTRACT_URL = "https://api.tavily.com/extract"
@@ -175,12 +178,20 @@ def page_text(url: str, cfg: Config) -> str:
         return ""
     try:
         net.DailyCounter(cfg.cache_dir / "quota.json", period="month").take(
-            "tavily", cfg.web_search_monthly_limit, "WEB_SEARCH_MONTHLY_LIMIT")
+            "tavily", cfg.web_search_monthly_limit, "WEB_SEARCH_MONTHLY_LIMIT"
+        )
         progress.step("market", f"reading the page through Tavily: {url}")
-        data = net.request("tavily", "POST", TAVILY_EXTRACT_URL, min_interval=1.0,
-                           json={"urls": [url], "extract_depth": "basic"},
-                           headers={"Authorization": f"Bearer {cfg.tavily_api_key}",
-                                    "Content-Type": "application/json"}) or {}
+        data = (
+            net.request(
+                "tavily",
+                "POST",
+                TAVILY_EXTRACT_URL,
+                min_interval=1.0,
+                json={"urls": [url], "extract_depth": "basic"},
+                headers={"Authorization": f"Bearer {cfg.tavily_api_key}", "Content-Type": "application/json"},
+            )
+            or {}
+        )
     except (net.QuotaReached, net.ProviderBlocked) as exc:
         net.block("tavily", str(exc))
         return ""
@@ -192,22 +203,46 @@ def page_text(url: str, cfg: Config) -> str:
 
 def _search(engine: str, query: str, sites, cfg: Config, count: int = 10) -> list:
     sites = [sites] if isinstance(sites, str) else list(sites)
+    # counted in Tavily credits: its thorough ("advanced") search costs 2
     net.DailyCounter(cfg.cache_dir / "quota.json", period="month").take(
-        engine, cfg.web_search_monthly_limit, "WEB_SEARCH_MONTHLY_LIMIT")
+        engine,
+        cfg.web_search_monthly_limit,
+        "WEB_SEARCH_MONTHLY_LIMIT",
+        cost=TAVILY_SEARCH_CREDITS if engine == "tavily" else 1,
+    )
     if engine == "langsearch":
-        data = net.request("langsearch", "POST", LANGSEARCH_URL, min_interval=0.5,
-                           json={"query": query, "freshness": "noLimit", "summary": True, "count": count},
-                           headers={"Authorization": f"Bearer {cfg.langsearch_api_key}",
-                                    "Content-Type": "application/json"}) or {}
+        data = (
+            net.request(
+                "langsearch",
+                "POST",
+                LANGSEARCH_URL,
+                min_interval=0.5,
+                json={"query": query, "freshness": "noLimit", "summary": True, "count": count},
+                headers={"Authorization": f"Bearer {cfg.langsearch_api_key}", "Content-Type": "application/json"},
+            )
+            or {}
+        )
         return _all_results(data)
     if engine == "tavily":
         # include_domains = Google's "site:" - every result is a page on the shop; raw_content = the page text,
         # so the ISBN and 定價 can be checked even if the shop refuses our own request for the page
-        data = net.request("tavily", "POST", TAVILY_URL, min_interval=1.0,
-                           json={"query": query, "include_domains": sites, "max_results": count,
-                                 "search_depth": "advanced", "include_raw_content": True},
-                           headers={"Authorization": f"Bearer {cfg.tavily_api_key}",
-                                    "Content-Type": "application/json"}) or {}
+        data = (
+            net.request(
+                "tavily",
+                "POST",
+                TAVILY_URL,
+                min_interval=1.0,
+                json={
+                    "query": query,
+                    "include_domains": sites,
+                    "max_results": count,
+                    "search_depth": "advanced",
+                    "include_raw_content": True,
+                },
+                headers={"Authorization": f"Bearer {cfg.tavily_api_key}", "Content-Type": "application/json"},
+            )
+            or {}
+        )
         return _all_results(data.get("results") or [])
     raise ValueError(f"unknown web search engine {engine!r}")
 
@@ -227,4 +262,5 @@ def price_in_text(text: str, isbn: str) -> str:
 def browser_search_url(isbn: str) -> str:
     """For the review window's 'Search the web' button: the search YOU run in your own browser (free, no limits)."""
     from urllib.parse import quote
+
     return "https://www.google.com/search?q=" + quote(f"{isbn} (site:eslite.com OR site:books.com.tw)")

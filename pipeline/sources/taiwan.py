@@ -1,6 +1,7 @@
 """Taiwanese book sources. None of them has a public, documented API, so:
 
-eslite    誠品  athena.eslite.com/api/v2/search - the JSON endpoint eslite.com's own search page calls. Unofficial: may change.
+eslite    誠品  athena.eslite.com/api/v2/search - the JSON endpoint eslite.com's own search page calls. Unofficial:
+          may change.
 books_tw  博客來 search.books.com.tw + www.books.com.tw/products/<id> - HTML scraping. They block obvious bots and
                sometimes non-Taiwan traffic; a 403 switches this provider off for the rest of the run.
 ncl       國家圖書館 全國新書資訊網 isbn.ncl.edu.tw - HTML form search by ISBN. Few details, last resort.
@@ -9,6 +10,7 @@ Politeness built in: at most one request every SCRAPE_DELAY seconds per site (de
 LOOKUP_CACHE_DAYS, a site that answers 403/429 is not asked again until the next run, and only the 1-2 pages
 needed per book are fetched. Check each site's terms of use; keep volumes low (a few hundred books, not bulk crawling).
 """
+
 from __future__ import annotations
 
 import html as htmllib
@@ -60,7 +62,7 @@ def _number(text) -> str:
 def _dejunk(s: str) -> str:
     for j in JUNK:
         s = s.replace(j, "")
-    s = re.sub(r"(?<=[\u3400-\u9fff])[?？](?=[\u3400-\u9fff])", "．", s)   # a middle dot lost in a name: 柯爾?諾瑟
+    s = re.sub(r"(?<=[\u3400-\u9fff])[?？](?=[\u3400-\u9fff])", "．", s)  # a middle dot lost in a name: 柯爾?諾瑟
     s = re.sub(r"\s*,(\s*,)*", ",", s).replace(",", ", ").replace(",  ", ", ")
     return re.sub(r"\s+", " ", s).strip(" ,，、")
 
@@ -92,13 +94,20 @@ def from_eslite(isbn: str, cfg: Config) -> dict:
     Reply: {"hits": {"found": "1", "hit": [{"id": "1001136022367152", "fields": {"name": ..., "author": [...],
             "manufacturer": [...], "manufacturer_date": "10/30/2014 00:00:00", "isbn": "9789861371955", ...}}]}}
     Only a hit whose isbn/ean equals our ISBN is used. The genre comes from eslite's category levels
-    (level1_name ... level3_name, e.g. 童書 / 兒童文学／橋梁書 / 冒險／驚悚小說); when the search hit doesn't carry them,
+    (level1_name ... level3_name, e.g. 童書 / 兒童文学／橋梁書 / 冒險／驚悚小說); when the search hit doesn't carry
+    them,
     one more request reads them (and the page count) from the product:
         GET https://athena.eslite.com/api/v1/products/1001136022367152
     """
-    data = net.request("eslite", "GET", ESLITE_SEARCH, params={"q": isbn, "size": 20, "start": 0}, memo=True,
-                       headers=_headers(cfg, "https://www.eslite.com/", "application/json"),
-                       min_interval=cfg.scrape_delay)
+    data = net.request(
+        "eslite",
+        "GET",
+        ESLITE_SEARCH,
+        params={"q": isbn, "size": 20, "start": 0},
+        memo=True,
+        headers=_headers(cfg, "https://www.eslite.com/", "application/json"),
+        min_interval=cfg.scrape_delay,
+    )
     hit = parse_eslite_search(data, isbn)
     if not hit:
         return {}
@@ -127,6 +136,7 @@ def from_eslite(isbn: str, cfg: Config) -> dict:
 def eslite_genre(d: dict, title: str = "") -> str:
     """eslite's category levels -> '童書 > 冒險／驚悚小說' (overarching > most specific)."""
     from .genre import from_parts
+
     return from_parts([_text(d.get(f"level{i}_name")) for i in (1, 2, 3)], title)
 
 
@@ -134,17 +144,24 @@ def parse_eslite_product(d: dict) -> dict:
     d = d or {}
     specs = {s.get("tag"): s.get("name", "") for s in d.get("product_specifications") or [] if isinstance(s, dict)}
     pages = re.sub(r"\D", "", str(specs.get("pages") or ""))
-    return {"pages": pages, "year": _year(d.get("manufacturer_date")),
-            "genre": eslite_genre(d, _text(d.get("name")))}
+    return {"pages": pages, "year": _year(d.get("manufacturer_date")), "genre": eslite_genre(d, _text(d.get("name")))}
 
 
 def eslite_product(product_id: str, cfg: Config) -> dict:
     """The raw product JSON: GET https://athena.eslite.com/api/v1/products/<id>
     (has isbn13 / isbn10 / ean, final_price = 定價 list price, retail_price = sale price, product_button_status)."""
     # its own name: eslite's SEARCH refusing us must not stop us reading a product page a web search found
-    return net.request("eslite_product", "GET", ESLITE_PRODUCT.format(id=product_id), memo=True,
-                       headers=_headers(cfg, "https://www.eslite.com/", "application/json"),
-                       min_interval=cfg.scrape_delay) or {}
+    return (
+        net.request(
+            "eslite_product",
+            "GET",
+            ESLITE_PRODUCT.format(id=product_id),
+            memo=True,
+            headers=_headers(cfg, "https://www.eslite.com/", "application/json"),
+            min_interval=cfg.scrape_delay,
+        )
+        or {}
+    )
 
 
 def eslite_details(product_id: str, cfg: Config) -> dict:
@@ -170,6 +187,7 @@ def parse_books_search(page: str) -> list:
 
 def _soup(page: str):
     from bs4 import BeautifulSoup
+
     return BeautifulSoup(page or "", "html.parser")
 
 
@@ -211,8 +229,8 @@ def parse_books_product(page: str, isbn: str) -> dict:
     genre = books_genre(soup, lines, title)
     out = {
         "isbn_on_page": page_isbn or "",
-        "list_price": _number(_labelled(lines, "定價")),       # 定價 = the publisher's price for a NEW copy (TWD)
-        "sale_price": _number(sale[-1]) if sale else "",       # 優惠價 = books.com.tw's current discounted price
+        "list_price": _number(_labelled(lines, "定價")),  # 定價 = the publisher's price for a NEW copy (TWD)
+        "sale_price": _number(sale[-1]) if sale else "",  # 優惠價 = books.com.tw's current discounted price
         "title": title,
         "author": author + (f" (譯者 {translator})" if translator and author else ""),
         "publisher": _labelled(lines, "出版社"),
@@ -230,28 +248,46 @@ def books_genre(soup, lines: list, title: str = "") -> str:
     (博客來 > 中文書 > 童書/青少年文學 > 兒童文學 > <the book>). Store sections like 中文書 and the book's own title
     are not genres and are left out. ('/' is part of books.com.tw's category names, so it is not a separator.)"""
     from .genre import from_parts, from_path
+
     text = _labelled(lines, "本書分類")
     if text:
         return from_path(text, sep=r"\s*[>›»＞]\s*", title=title)
-    crumbs = [a.get_text(" ", strip=True) for a in soup.select(
-        "ul.type04_breadcrumb li, ul.container_24.type04_breadcrumb li, [class*=breadcrumb] li, "
-        "[itemtype*=BreadcrumbList] [itemprop=name]")]
+    crumbs = [
+        a.get_text(" ", strip=True)
+        for a in soup.select(
+            "ul.type04_breadcrumb li, ul.container_24.type04_breadcrumb li, [class*=breadcrumb] li, "
+            "[itemtype*=BreadcrumbList] [itemprop=name]"
+        )
+    ]
     return from_parts(crumbs, title) if crumbs else ""
 
 
 def from_books_tw(isbn: str, cfg: Config) -> dict:
     """博客來 books.com.tw. Two pages per book:
         GET https://search.books.com.tw/search/query/key/9789861371955/cat/all   -> product ids like 0010654321
-        GET https://www.books.com.tw/products/0010654321                          -> title, 作者, 出版社, 出版日期, ISBN, 規格
+        GET https://www.books.com.tw/products/0010654321    -> title, 作者, 出版社, 出版日期, ISBN, 規格
         headers: browser User-Agent, Accept-Language: zh-TW
     The product page's ISBN must equal ours, otherwise it is a different edition and is skipped.
     """
-    page = net.request("books_tw", "GET", BOOKS_SEARCH.format(isbn=isbn), headers=_headers(cfg, "https://www.books.com.tw/"), memo=True,
-                       min_interval=cfg.scrape_delay, expect="text")
+    page = net.request(
+        "books_tw",
+        "GET",
+        BOOKS_SEARCH.format(isbn=isbn),
+        headers=_headers(cfg, "https://www.books.com.tw/"),
+        memo=True,
+        min_interval=cfg.scrape_delay,
+        expect="text",
+    )
     for pid in parse_books_search(page or "")[:2]:
-        prod = net.request("books_tw", "GET", BOOKS_PRODUCT.format(id=pid), memo=True,
-                           headers=_headers(cfg, BOOKS_SEARCH.format(isbn=isbn)),
-                           min_interval=cfg.scrape_delay, expect="text")
+        prod = net.request(
+            "books_tw",
+            "GET",
+            BOOKS_PRODUCT.format(id=pid),
+            memo=True,
+            headers=_headers(cfg, BOOKS_SEARCH.format(isbn=isbn)),
+            min_interval=cfg.scrape_delay,
+            expect="text",
+        )
         got = parse_books_product(prod or "", isbn)
         if got:
             return {k: v for k, v in got.items() if k not in ("isbn_on_page", "list_price", "sale_price")}
@@ -259,9 +295,15 @@ def from_books_tw(isbn: str, cfg: Config) -> dict:
 
 
 # ---- 國家圖書館 全國新書資訊網 (NCL ISBN) -------------------------------------------------------------
-NCL_COLS = {"title": ("書名", "題名", "Title"), "author": ("作者", "Author"), "publisher": ("出版者", "出版社", "出版機構", "Publisher"),
-            "year": ("出版日期", "出版年月", "出版年", "Date"), "format": ("裝訂", "Binding"), "isbn": ("ISBN",),
-            "list_price": ("定價", "價格", "Price")}
+NCL_COLS = {
+    "title": ("書名", "題名", "Title"),
+    "author": ("作者", "Author"),
+    "publisher": ("出版者", "出版社", "出版機構", "Publisher"),
+    "year": ("出版日期", "出版年月", "出版年", "Date"),
+    "format": ("裝訂", "Binding"),
+    "isbn": ("ISBN",),
+    "list_price": ("定價", "價格", "Price"),
+}
 
 
 def parse_ncl(page: str, isbn: str) -> dict:
@@ -287,20 +329,29 @@ def parse_ncl(page: str, isbn: str) -> dict:
             attrs = " ".join(str(t.get(a) or "") for t in tr.find_all(True) for a in ("alt", "title", "href", "src"))
             row_isbns = {normalize(x) for x in re.findall(r"[0-9Xx-]{10,17}", " ".join(cells) + " " + attrs)} - {None}
             if isbn not in row_isbns and ("isbn" in col or row_isbns):
-                continue                       # another book's row
-            get = lambda k: cells[col[k]] if k in col and col[k] < len(cells) else ""
-            return {"title": _dejunk(get("title")), "author": _dejunk(get("author")),
-                    "publisher": _dejunk(get("publisher")), "year": _roc_year(get("year")),
-                    "format": _dejunk(get("format")), "list_price": _number(get("list_price")),
-                    "isbn_matched": isbn in row_isbns}
+                continue  # another book's row
+            got = {k: (cells[i] if i < len(cells) else "") for k, i in col.items()}
+            return {
+                "title": _dejunk(got.get("title", "")),
+                "author": _dejunk(got.get("author", "")),
+                "publisher": _dejunk(got.get("publisher", "")),
+                "year": _roc_year(got.get("year", "")),
+                "format": _dejunk(got.get("format", "")),
+                "list_price": _number(got.get("list_price", "")),
+                "isbn_matched": isbn in row_isbns,
+            }
     # fallback: a detail-style page with "書名：..." lines
     lines = [re.sub(r"\s+", " ", t) for t in soup.get_text("\n").split("\n") if t.strip()]
     title = _labelled(lines, "書名") or _labelled(lines, "題名")
     if not title:
         return {}
-    return {"title": title, "author": _labelled(lines, "作者"), "publisher": _labelled(lines, "出版者") or _labelled(lines, "出版社"),
-            "year": _year(_labelled(lines, "出版日期") or _labelled(lines, "出版年月")),
-            "list_price": _number(_labelled(lines, "定價"))}
+    return {
+        "title": title,
+        "author": _labelled(lines, "作者"),
+        "publisher": _labelled(lines, "出版者") or _labelled(lines, "出版社"),
+        "year": _year(_labelled(lines, "出版日期") or _labelled(lines, "出版年月")),
+        "list_price": _number(_labelled(lines, "定價")),
+    }
 
 
 def _roc_year(text: str) -> str:
@@ -338,7 +389,7 @@ def parse_ncl_detail(page: str) -> dict:
             value = cells[1].get_text(" ", strip=True)
             if label and label not in fields:
                 fields[label] = value
-    if not fields:   # some pages use "label：value" lines instead of a table
+    if not fields:  # some pages use "label：value" lines instead of a table
         for ln in soup.get_text("\n").split("\n"):
             m = re.match(r"\s*([^：:]{1,12})[：:]\s*(.+)", ln)
             if m and m.group(1).strip() not in fields:
@@ -350,23 +401,30 @@ def parse_ncl_detail(page: str) -> dict:
                 if want.lower() in k.lower():
                     return v
         return ""
+
     from .genre import from_subjects
+
     isbn_text = get("ISBN")
     price_text = get("定價", "價格", "Price")
     pages = re.search(r"\d+", get("頁數", "Pages"))
     binding = re.search(r"\(([^)]+)\)", isbn_text)
-    return {"title": _dejunk(get("書名", "題名", "Title")), "author": _dejunk(get("作者", "Author")),
-            "publisher": _dejunk(get("出版機構", "出版者", "出版社", "Publisher")),
-            "year": _roc_year(get("出版年月", "出版日期", "Publication Date", "Date")),
-            "pages": pages.group(0) if pages else "", "format": binding.group(1) if binding else "",
-            "genre": from_subjects(get("主題標題", "Subject Heading", "Subject")),
-            "isbns": sorted({normalize(x) for x in re.findall(r"[0-9Xx-]{10,17}", isbn_text)} - {None}),
-            "list_price": _number(price_text), "price_text": price_text}
+    return {
+        "title": _dejunk(get("書名", "題名", "Title")),
+        "author": _dejunk(get("作者", "Author")),
+        "publisher": _dejunk(get("出版機構", "出版者", "出版社", "Publisher")),
+        "year": _roc_year(get("出版年月", "出版日期", "Publication Date", "Date")),
+        "pages": pages.group(0) if pages else "",
+        "format": binding.group(1) if binding else "",
+        "genre": from_subjects(get("主題標題", "Subject Heading", "Subject")),
+        "isbns": sorted({normalize(x) for x in re.findall(r"[0-9Xx-]{10,17}", isbn_text)} - {None}),
+        "list_price": _number(price_text),
+        "price_text": price_text,
+    }
 
 
 NCL_SEARCH = "H30_SearchBooks.php"
 NCL_RESULTS = "main_DisplayResults.php"
-_NCL_READY: dict = {}      # base -> True once this run has a session with NCL (its search lives in that session)
+_NCL_READY: dict = {}  # base -> True once this run has a session with NCL (its search lives in that session)
 
 
 class NCLUnavailable(RuntimeError):
@@ -376,8 +434,10 @@ class NCLUnavailable(RuntimeError):
 def _ncl_fetch(cfg: Config, method: str, url: str, hdr: dict, **kw) -> str:
     """One NCL page. retries=1: a server error (500 - e.g. a search without a session) is a plain error for this
     attempt, not a reason to stop asking NCL for the rest of the run."""
-    page = net.request("ncl", method, url, headers=hdr, min_interval=cfg.scrape_delay, expect="text", retries=1,
-                       **kw) or ""
+    page = (
+        net.request("ncl", method, url, headers=hdr, min_interval=cfg.scrape_delay, expect="text", retries=1, **kw)
+        or ""
+    )
     if "Fatal error" in page[:2000] and "Uncaught" in page[:2000]:
         raise RuntimeError("NCL answered with a server error page")
     return page
@@ -401,19 +461,29 @@ def _ncl_record(page: str, isbn: str, base: str, cfg: Config, where: str, strict
     """OUR book's record from an NCL result page: open the full records the titles link to (they carry 定價 and
     主題標題) and keep the one listing our ISBN; else the result row itself (title / author / publisher only)."""
     for url in parse_ncl_links(page, base)[:3]:
-        detail = net.request("ncl", "GET", url, headers=_headers(cfg, f"{base}/{NCL_SEARCH}"),
-                             min_interval=cfg.scrape_delay, expect="text", memo=True) or ""
+        detail = (
+            net.request(
+                "ncl",
+                "GET",
+                url,
+                headers=_headers(cfg, f"{base}/{NCL_SEARCH}"),
+                min_interval=cfg.scrape_delay,
+                expect="text",
+                memo=True,
+            )
+            or ""
+        )
         d = parse_ncl_detail(detail)
         if isbn in d["isbns"]:
             d["ncl_url"] = url
             return d
-    d = parse_ncl_detail(page)                 # a single hit may open the full record straight away
+    d = parse_ncl_detail(page)  # a single hit may open the full record straight away
     if isbn in d["isbns"]:
         d["ncl_url"] = where
         return d
-    row = parse_ncl(page, isbn)                # the result row: title is plain text (no full record online)
+    row = parse_ncl(page, isbn)  # the result row: title is plain text (no full record online)
     if strict and not row.get("isbn_matched"):
-        return {}                              # a title search: the row must show OUR ISBN
+        return {}  # a title search: the row must show OUR ISBN
     if row:
         row["ncl_url"] = where
     return row
@@ -438,12 +508,25 @@ def from_ncl(isbn: str, cfg: Config, title: str = "") -> dict:
     base = cfg.ncl_base
     hdr = _headers(cfg, base + "/")
     _ncl_session(cfg, base, hdr)
-    searches = [("isbn", "GET", f"{base}/{NCL_SEARCH}", {"params": {"Pact": "Search", "Pval": isbn}}),
-                ("results", "GET", f"{base}/{NCL_RESULTS}", {"params": {"Pact": "Search", "Pval": isbn}}),
-                ("catalogue", "POST", f"{base}/{NCL_SEARCH}?Pact=DisplayAll4Simple",
-                 {"data": {"FO_SearchField0": "ISBN", "FO_SearchValue0": isbn, "FO_SchRe1ation0": "AND",
-                           "FB_clicked": "FB_開始查詢", "FB_pageSID": "Simple"}}),
-                ("session", "GET", f"{base}/{NCL_RESULTS}", {"params": {"Pact": "DisplayAll"}})]
+    searches = [
+        ("isbn", "GET", f"{base}/{NCL_SEARCH}", {"params": {"Pact": "Search", "Pval": isbn}}),
+        ("results", "GET", f"{base}/{NCL_RESULTS}", {"params": {"Pact": "Search", "Pval": isbn}}),
+        (
+            "catalogue",
+            "POST",
+            f"{base}/{NCL_SEARCH}?Pact=DisplayAll4Simple",
+            {
+                "data": {
+                    "FO_SearchField0": "ISBN",
+                    "FO_SearchValue0": isbn,
+                    "FO_SchRe1ation0": "AND",
+                    "FB_clicked": "FB_開始查詢",
+                    "FB_pageSID": "Simple",
+                }
+            },
+        ),
+        ("session", "GET", f"{base}/{NCL_RESULTS}", {"params": {"Pact": "DisplayAll"}}),
+    ]
     t = re.split(r"\s*[:：(（]", title or "")[0].strip()
     if t:
         searches.append(("title", "GET", f"{base}/{NCL_SEARCH}", {"params": {"Pact": "Search", "Pval": t}}))
@@ -457,9 +540,9 @@ def from_ncl(isbn: str, cfg: Config, title: str = "") -> dict:
         except Exception as exc:
             errors.append(f"{how}: {exc}")
             if not answered and how == "isbn":
-                _ncl_session(cfg, base, hdr, again=True)        # the session may have expired: start a new one
+                _ncl_session(cfg, base, hdr, again=True)  # the session may have expired: start a new one
             continue
-        answered = answered or how in ("isbn", "results")    # NCL really searched (not just showed its form)
+        answered = answered or how in ("isbn", "results")  # NCL really searched (not just showed its form)
         # a page listing other books' rows only (a title search, or the session's results) must show OUR ISBN
         got = _ncl_record(page, isbn, base, cfg, where, strict=how in ("title", "session"))
         if got:

@@ -7,17 +7,18 @@ Engines (set DECODERS in .env, tried in that order, first ISBN wins):
 Engines that are not installed are skipped silently.
 
 For a photo of ONE book (a back photo) `decode_isbn_image` tries the picture several ways
-(sizes, contrast, sharpening, small tilts, tiles) until something reads. DECODE_EFFORT=fast|normal|max sets how hard it tries.
+(sizes, contrast, sharpening, small tilts, tiles) until something reads. DECODE_EFFORT=fast|normal|max sets how
+hard it tries.
 
 Taiwanese books usually carry two EAN-13 barcodes: the ISBN (978/979...) and a price/product code (often 471...).
 Only 978/979 codes that pass the ISBN checksum are accepted, so the price barcode is ignored.
 """
+
 from __future__ import annotations
 
 import math
 import re
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Iterable, List, Optional
 
 from PIL import Image, ImageFilter, ImageOps
@@ -66,13 +67,9 @@ def available_engines() -> List[str]:
 @dataclass
 class Detection:
     isbn: str
-    cx: Optional[float] = None       # centre of the barcode, in image pixels
+    cx: Optional[float] = None  # centre of the barcode, in image pixels
     cy: Optional[float] = None
-    width: Optional[float] = None    # barcode length in pixels
-
-    @property
-    def px_per_module(self) -> Optional[float]:
-        return self.width / EAN13_MODULES if self.width else None
+    width: Optional[float] = None  # barcode length in pixels
 
 
 def load_image(path) -> Image.Image:
@@ -100,7 +97,7 @@ def exif_orientation(path):
 
 
 # ---- engines -----------------------------------------------------------------------------------
-ADDONS: dict = {}   # ISBN -> the 5-digit add-on barcode next to it (price on many English books), when read
+ADDONS: dict = {}  # ISBN -> the 5-digit add-on barcode next to it (price on many English books), when read
 
 
 def split_addon(text: str):
@@ -120,8 +117,8 @@ def _zxing(img: Image.Image, binarizer: str = "") -> List[Detection]:
         kw["formats"] = zxingcpp.BarcodeFormat.EAN13
         if binarizer:
             kw["binarizer"] = getattr(zxingcpp.Binarizer, binarizer)
-        results = list(zxingcpp.read_barcodes(img, **kw))     # 1) the ISBN alone - exactly as before
-        if results:                                           # 2) only then: also try to read the price add-on
+        results = list(zxingcpp.read_barcodes(img, **kw))  # 1) the ISBN alone - exactly as before
+        if results:  # 2) only then: also try to read the price add-on
             try:
                 with_addon = zxingcpp.read_barcodes(img, ean_add_on_symbol=zxingcpp.EanAddOnSymbol.Read, **kw)
                 for r in with_addon:
@@ -142,8 +139,12 @@ def _zxing(img: Image.Image, binarizer: str = "") -> List[Detection]:
             ADDONS[isbn] = addon
         try:
             p = r.position
-            pts = [(p.top_left.x, p.top_left.y), (p.top_right.x, p.top_right.y),
-                   (p.bottom_right.x, p.bottom_right.y), (p.bottom_left.x, p.bottom_left.y)]
+            pts = [
+                (p.top_left.x, p.top_left.y),
+                (p.top_right.x, p.top_right.y),
+                (p.bottom_right.x, p.bottom_right.y),
+                (p.bottom_left.x, p.bottom_left.y),
+            ]
             cx = sum(x for x, _ in pts) / 4
             cy = sum(y for _, y in pts) / 4
             width = max(math.dist(pts[0], pts[1]), math.dist(pts[1], pts[2]))
@@ -165,7 +166,9 @@ def _zbar(img: Image.Image) -> List[Detection]:
         if not isbn:
             continue
         rc = r.rect
-        out.append(Detection(isbn, rc.left + rc.width / 2, rc.top + rc.height / 2, float(max(rc.width, rc.height)) or None))
+        out.append(
+            Detection(isbn, rc.left + rc.width / 2, rc.top + rc.height / 2, float(max(rc.width, rc.height)) or None)
+        )
     return out
 
 
@@ -206,19 +209,6 @@ def _run(name: str, img: Image.Image, **kw) -> List[Detection]:
     return []
 
 
-def _read_detections(img: Image.Image, engines: Optional[Iterable[str]] = None, first_only: bool = False) -> List[Detection]:
-    names = list(engines) if engines is not None else available_engines()
-    if not names:
-        raise RuntimeError("No barcode reader installed. Run: pip install zxing-cpp  (and optionally pyzbar)")
-    out: List[Detection] = []
-    for name in names:
-        got = _run(name, img)
-        out += got
-        if got and first_only:
-            break
-    return out
-
-
 # ---- single-book photo: try hard -------------------------------------------------------------
 def _scaled(img: Image.Image, longest: int) -> Image.Image:
     m = max(img.size)
@@ -239,8 +229,12 @@ def _tiles(img: Image.Image, n: int, overlap: float = 0.25):
     tw, th = W / n, H / n
     for r in range(n):
         for c in range(n):
-            box = (int(max(0, (c - overlap) * tw)), int(max(0, (r - overlap) * th)),
-                   int(min(W, (c + 1 + overlap) * tw)), int(min(H, (r + 1 + overlap) * th)))
+            box = (
+                int(max(0, (c - overlap) * tw)),
+                int(max(0, (r - overlap) * th)),
+                int(min(W, (c + 1 + overlap) * tw)),
+                int(min(H, (r + 1 + overlap) * th)),
+            )
             t = img.crop(box)
             if max(t.size) < 1600:
                 t = t.resize((t.width * 2, t.height * 2), Image.LANCZOS)
@@ -272,12 +266,15 @@ def _located_crops(img: Image.Image) -> Iterable[Image.Image]:
         box = cv2.boxPoints(((cx, cy), (w, h), ang)).astype("float32")
         # order the corners: top-left, top-right, bottom-right, bottom-left
         sm, df = box.sum(axis=1), np.diff(box, axis=1).ravel()
-        src = np.array([box[np.argmin(sm)], box[np.argmin(df)], box[np.argmax(sm)], box[np.argmax(df)]], dtype="float32")
+        src = np.array(
+            [box[np.argmin(sm)], box[np.argmin(df)], box[np.argmax(sm)], box[np.argmax(df)]], dtype="float32"
+        )
         scale = max(1.0, 1100 / w)
         W, H = int(w * scale), int(h * scale)
         dst = np.array([[0, 0], [W - 1, 0], [W - 1, H - 1], [0, H - 1]], dtype="float32")
-        warped = cv2.warpPerspective(full, cv2.getPerspectiveTransform(src, dst), (W, H), flags=cv2.INTER_CUBIC,
-                                     borderValue=(255, 255, 255))
+        warped = cv2.warpPerspective(
+            full, cv2.getPerspectiveTransform(src, dst), (W, H), flags=cv2.INTER_CUBIC, borderValue=(255, 255, 255)
+        )
         crop = Image.fromarray(warped)
         yield crop
         yield _enhanced(crop)
@@ -291,14 +288,14 @@ def _variants(img: Image.Image, effort: str = "normal") -> Iterable[Image.Image]
             yield _scaled(img, longest)
     mid = _scaled(img, 1600)
     yield _enhanced(mid)
-    yield mid.filter(ImageFilter.GaussianBlur(1.2))          # removes JPEG noise / moire on glossy covers
-    if max(img.size) < 1400:                                   # small photo (Telegram 'Photo'): enlarge it
+    yield mid.filter(ImageFilter.GaussianBlur(1.2))  # removes JPEG noise / moire on glossy covers
+    if max(img.size) < 1400:  # small photo (Telegram 'Photo'): enlarge it
         yield img.resize((img.width * 2, img.height * 2), Image.LANCZOS)
     if effort == "fast":
         return
     yield from _located_crops(img)
     big = _scaled(img, 2600)
-    for angle in (8, -8, 16, -16):                             # tilted shots: 1D readers scan lines, so a tilt hurts
+    for angle in (8, -8, 16, -16):  # tilted shots: 1D readers scan lines, so a tilt hurts
         yield big.rotate(angle, expand=True, fillcolor=(255, 255, 255), resample=Image.BICUBIC)
     yield from _tiles(_scaled(img, 3000), 2)
     if effort == "max":
@@ -319,7 +316,7 @@ def _find(img: Image.Image, effort: str):
             if got:
                 return got[0], variant
         if "zxing" in engines and effort != "fast" and variant is img:
-            for b in ("GlobalHistogram", "FixedThreshold"):   # other ways of deciding black vs white
+            for b in ("GlobalHistogram", "FixedThreshold"):  # other ways of deciding black vs white
                 v = _scaled(img, 2000)
                 got = _run("zxing", v, binarizer=b)
                 if got:
@@ -346,8 +343,12 @@ def addon_crops(img: Image.Image, det: Optional[Detection]) -> List[Image.Image]
     out = []
     if det is not None and det.cx is not None and det.width:
         w = det.width
-        box = (int(max(0, det.cx - 0.75 * w)), int(max(0, det.cy - 0.6 * w)),
-               int(min(img.width, det.cx + 1.6 * w)), int(min(img.height, det.cy + 0.6 * w)))
+        box = (
+            int(max(0, det.cx - 0.75 * w)),
+            int(max(0, det.cy - 0.6 * w)),
+            int(min(img.width, det.cx + 1.6 * w)),
+            int(min(img.height, det.cy + 0.6 * w)),
+        )
         if box[2] - box[0] > 20 and box[3] - box[1] > 10:
             crop = img.crop(box)
             scale = max(1.0, 1800 / crop.width)
@@ -362,8 +363,9 @@ def _addon_zxing(img: Image.Image, isbn: str) -> str:
         return ""
     for mode in ("Require", "Read"):
         try:
-            res = zxingcpp.read_barcodes(img, formats=zxingcpp.BarcodeFormat.EAN13,
-                                         ean_add_on_symbol=getattr(zxingcpp.EanAddOnSymbol, mode))
+            res = zxingcpp.read_barcodes(
+                img, formats=zxingcpp.BarcodeFormat.EAN13, ean_add_on_symbol=getattr(zxingcpp.EanAddOnSymbol, mode)
+            )
         except (TypeError, AttributeError):
             return ""
         except Exception:
@@ -410,12 +412,3 @@ def read_addon(img: Image.Image, isbn: str, det: Optional[Detection] = None, eff
             ADDONS[isbn] = addon
             return addon
     return ""
-
-
-def decode_isbn(path) -> Optional[str]:
-    """Return one ISBN-13 found in the photo, or None."""
-    try:
-        img = load_image(Path(path))
-    except Exception:
-        return None
-    return decode_isbn_image(img)

@@ -13,6 +13,7 @@ a Save writes only that book's edited fields into data/books.csv, under a file l
 Slow work (online look-ups, loading big photos, making the upload file) runs on a background thread so the window never
 freezes.
 """
+
 from __future__ import annotations
 
 import html
@@ -20,28 +21,76 @@ import sys
 import traceback
 from pathlib import Path
 
-from PyQt6.QtCore import (QEvent, QObject, QPoint, QRect, QRunnable, QSize, Qt, QThreadPool, QTimer, QUrl, pyqtSignal,
-                          pyqtSlot)
+from PyQt6.QtCore import (
+    QEvent,
+    QObject,
+    QPoint,
+    QRect,
+    QRunnable,
+    QSize,
+    Qt,
+    QThreadPool,
+    QTimer,
+    QUrl,
+    pyqtSignal,
+    pyqtSlot,
+)
 from PyQt6.QtGui import QColor, QDesktopServices, QFont, QIcon, QKeySequence, QPainter, QPen, QPixmap, QShortcut
-from PyQt6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QFileDialog, QFormLayout, QFrame, QHBoxLayout,
-                             QStyledItemDelegate,
-                             QLabel, QLayout, QLineEdit, QMainWindow, QMessageBox, QPlainTextEdit, QPushButton,
-                             QScrollArea, QSizePolicy, QSplitter, QToolBar, QToolButton, QTreeWidget, QTreeWidgetItem,
-                             QVBoxLayout, QWidget)
+from PyQt6.QtWidgets import (
+    QApplication,
+    QCheckBox,
+    QComboBox,
+    QDialog,
+    QFileDialog,
+    QFormLayout,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QLayout,
+    QLineEdit,
+    QMainWindow,
+    QMessageBox,
+    QPlainTextEdit,
+    QPushButton,
+    QScrollArea,
+    QSizePolicy,
+    QSplitter,
+    QStyledItemDelegate,
+    QToolBar,
+    QToolButton,
+    QTreeWidget,
+    QTreeWidgetItem,
+    QVBoxLayout,
+    QWidget,
+)
 
-from . import editing
 from ..core.config import Config
 from ..core.validate import CONDITION_GRADES
 from ..sources.genre import join_genres, split_genres
+from . import editing
 
 # ---- look -------------------------------------------------------------------------------------
 # A calm blue theme. Status colours are dark enough to read on white (WCAG AA) and always come with words too.
 RED, GREEN, AMBER, BLUE = "#b42318", "#15803d", "#b45309", "#1d4ed8"
-INK, MUTED, LINE, PAGE, ACCENT, ACCENT_DARK, ACCENT_SOFT = ("#0f172a", "#475569", "#cbd5e1", "#f3f6fb", "#2563eb",
-                                                            "#1e40af", "#dbeafe")
-SET_ROLE = Qt.ItemDataRole.UserRole.value + 1     # where a set heading in the book tree keeps its set code
-LINE_FIELDS = [("isbn13", "ISBN (13 digits)"), ("title", "Title"), ("author", "Author"), ("publisher", "Publisher"),
-               ("year", "Year"), ("pages", "Pages"), ("genre", "Genres")]
+INK, MUTED, LINE, PAGE, ACCENT, ACCENT_DARK, ACCENT_SOFT = (
+    "#0f172a",
+    "#475569",
+    "#cbd5e1",
+    "#f3f6fb",
+    "#2563eb",
+    "#1e40af",
+    "#dbeafe",
+)
+SET_ROLE = Qt.ItemDataRole.UserRole.value + 1  # where a set heading in the book tree keeps its set code
+LINE_FIELDS = [
+    ("isbn13", "ISBN (13 digits)"),
+    ("title", "Title"),
+    ("author", "Author"),
+    ("publisher", "Publisher"),
+    ("year", "Year"),
+    ("pages", "Pages"),
+    ("genre", "Genres"),
+]
 STYLE = f"""
 QMainWindow, QDialog {{ background: {PAGE}; }}
 QWidget {{ color: {INK}; font-size: 10pt; }}
@@ -111,12 +160,13 @@ QSplitter::handle {{ background: transparent; width: 8px; }}
 
 
 # ---- background work ---------------------------------------------------------------------------
-_PENDING: set = set()   # keeps result relays alive until their answer has been delivered
+_PENDING: set = set()  # keeps result relays alive until their answer has been delivered
 
 
 class _Relay(QObject):
     """Lives in the GUI thread. The worker emits its signals; Qt queues them over to this object, so the callbacks
     (which touch widgets) always run on the GUI thread."""
+
     done = pyqtSignal(object)
     failed = pyqtSignal(str)
 
@@ -174,7 +224,7 @@ def alive(widget) -> bool:
 
 def dot_icon(color: str) -> QIcon:
     """A small round status dot."""
-    pm = QPixmap(32, 32)                      # drawn big, shown small: sharp at any Windows scaling
+    pm = QPixmap(32, 32)  # drawn big, shown small: sharp at any Windows scaling
     pm.fill(QColor(0, 0, 0, 0))
     p = QPainter(pm)
     p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -282,13 +332,14 @@ def screen_size(widget: QWidget, fraction: float = 0.9) -> QSize:
         screen = widget.screen() or QApplication.primaryScreen()
         g = screen.availableGeometry()
         return QSize(int(g.width() * fraction), int(g.height() * fraction))
-    except Exception:                       # no screen known yet
+    except Exception:  # no screen known yet
         return QSize(1200, 800)
 
 
 # ---- photos ------------------------------------------------------------------------------------
 class ZoomLabel(QLabel):
     """The picture in the photo viewer: left click = bigger, right click = smaller (at the point clicked)."""
+
     zoom_in = pyqtSignal(object)
     zoom_out = pyqtSignal(object)
 
@@ -304,15 +355,17 @@ class PhotoViewer(QDialog):
     """A photo, big. It always opens showing the WHOLE photo fitted to the window (so every photo appears at the same
     size), in a window sized to your screen. Bigger / smaller: the buttons, + and -, left / right click on the photo,
     or Ctrl + mouse wheel. 0 = fit again, 1 = actual size."""
+
     STEP = 1.25
 
-    def __init__(self, cfg: Config, path: str, title: str, parent=None, pos: int = 0, numbered: bool = False,
-                 mark: int = 0):
+    def __init__(
+        self, cfg: Config, path: str, title: str, parent=None, pos: int = 0, numbered: bool = False, mark: int = 0
+    ):
         super().__init__(parent)
-        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)      # its big photo is freed when you close it
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)  # its big photo is freed when you close it
         self.setWindowTitle(title)
         self.pix = None
-        self.zoom = None              # None = fit the whole photo into the window
+        self.zoom = None  # None = fit the whole photo into the window
         self.label = ZoomLabel("Loading...")
         self.label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.label.zoom_in.connect(lambda p: self.zoom_by(self.STEP, p))
@@ -321,8 +374,9 @@ class PhotoViewer(QDialog):
         self.area.setWidget(self.label)
         self.area.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.area.viewport().installEventFilter(self)
-        self.area.setStyleSheet("QScrollArea, QScrollArea > QWidget#qt_scrollarea_viewport "
-                                "{ background: #1e293b; border-radius: 6px; }")
+        self.area.setStyleSheet(
+            "QScrollArea, QScrollArea > QWidget#qt_scrollarea_viewport { background: #1e293b; border-radius: 6px; }"
+        )
         self.smaller_btn = QPushButton("−  Smaller")
         self.smaller_btn.setToolTip("Zoom out (-, or right-click the photo)")
         self.smaller_btn.clicked.connect(lambda: self.zoom_by(1 / self.STEP))
@@ -345,13 +399,19 @@ class PhotoViewer(QDialog):
         lay = QVBoxLayout(self)
         lay.addLayout(bar)
         lay.addWidget(self.area, 1)
-        for keys, fn in (("+", lambda: self.zoom_by(self.STEP)), ("=", lambda: self.zoom_by(self.STEP)),
-                         ("-", lambda: self.zoom_by(1 / self.STEP)), ("0", self.fit), ("1", lambda: self.set_zoom(1.0))):
+        for keys, fn in (
+            ("+", lambda: self.zoom_by(self.STEP)),
+            ("=", lambda: self.zoom_by(self.STEP)),
+            ("-", lambda: self.zoom_by(1 / self.STEP)),
+            ("0", self.fit),
+            ("1", lambda: self.set_zoom(1.0)),
+        ):
             QShortcut(QKeySequence(keys), self).activated.connect(fn)
         self.resize(screen_size(self, 0.9))
         no_default_buttons(self)
-        run_in_background(editing.thumbnail_bytes, cfg, path, 2400, pos, numbered, mark, on_done=self._show,
-                          on_fail=self._failed)
+        run_in_background(
+            editing.thumbnail_bytes, cfg, path, 2400, pos, numbered, mark, on_done=self._show, on_fail=self._failed
+        )
 
     def _failed(self, message: str):
         if alive(self.label):
@@ -391,7 +451,7 @@ class PhotoViewer(QDialog):
         h, v = self.area.horizontalScrollBar(), self.area.verticalScrollBar()
         ax = anchor.x() if anchor is not None else h.value() + self.area.viewport().width() // 2
         ay = anchor.y() if anchor is not None else v.value() + self.area.viewport().height() // 2
-        off_x, off_y = ax - h.value(), ay - v.value()     # where that point is on screen: keep it there
+        off_x, off_y = ax - h.value(), ay - v.value()  # where that point is on screen: keep it there
         self._apply()
         r = self.zoom / old if old else 1.0
         h.setValue(int(ax * r - off_x))
@@ -411,7 +471,7 @@ class PhotoViewer(QDialog):
 
     def showEvent(self, event):
         super().showEvent(event)
-        QTimer.singleShot(0, self._apply)       # the window has its real size now: fit to it
+        QTimer.singleShot(0, self._apply)  # the window has its real size now: fit to it
 
     def eventFilter(self, obj, event):
         """Ctrl + mouse wheel over the photo zooms (before the scroll bars can take the wheel)."""
@@ -423,6 +483,7 @@ class PhotoViewer(QDialog):
 
 class Thumb(QLabel):
     """A clickable photo thumbnail - every one the same size, the photo fitted inside."""
+
     clicked = pyqtSignal()
     SIZE = 160
 
@@ -438,8 +499,14 @@ class Thumb(QLabel):
     def set_image(self, data: bytes):
         pm = QPixmap()
         pm.loadFromData(data)
-        self.setPixmap(pm.scaled(self.SIZE - 8, self.SIZE - 8, Qt.AspectRatioMode.KeepAspectRatio,
-                                 Qt.TransformationMode.SmoothTransformation))
+        self.setPixmap(
+            pm.scaled(
+                self.SIZE - 8,
+                self.SIZE - 8,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+        )
 
     def mousePressEvent(self, event):
         self.clicked.emit()
@@ -490,10 +557,10 @@ class FlowLayout(QLayout):
         x, y, line = rect.x(), rect.y(), 0
         space = self.spacing()
         for item in self._flow_items:
-            if item.widget() is not None and item.widget().isHidden():     # e.g. the add box while not adding
+            if item.widget() is not None and item.widget().isHidden():  # e.g. the add box while not adding
                 continue
             hint = item.sizeHint()
-            if x + hint.width() > rect.right() + 1 and line > 0:      # does not fit: next line
+            if x + hint.width() > rect.right() + 1 and line > 0:  # does not fit: next line
                 x, y, line = rect.x(), y + line + space, 0
             if not test_only:
                 item.setGeometry(QRect(QPoint(x, y), hint))
@@ -506,13 +573,14 @@ class GenreEditor(QWidget):
     """The book's genres as chips: x removes one, '+ Add genre' adds one (Enter to add, Esc to cancel). Chips run
     left to right and wrap downwards. Behaves like a line edit for the rest of the window: text() / setText() give
     the genres as stored in books.csv ('童書 > 冒險／驚悚小說')."""
+
     textEdited = pyqtSignal(str)
 
     def __init__(self):
         super().__init__()
         self._genres: list = []
         self._chips: list = []
-        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)    # so the red 'to fix' look shows
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)  # so the red 'to fix' look shows
         self.flow = FlowLayout(self)
         policy = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         policy.setHeightForWidth(True)
@@ -523,7 +591,7 @@ class GenreEditor(QWidget):
         self.input.returnPressed.connect(self._finish_add)
         self.input.setVisible(False)
         esc = QShortcut(QKeySequence("Escape"), self.input)
-        esc.setContext(Qt.ShortcutContext.WidgetShortcut)          # only while typing a genre
+        esc.setContext(Qt.ShortcutContext.WidgetShortcut)  # only while typing a genre
         esc.activated.connect(self._cancel_add)
         self.add_btn = QToolButton()
         self.add_btn.setObjectName("addChip")
@@ -594,7 +662,7 @@ class GenreEditor(QWidget):
     def _rebuild(self) -> None:
         while self.flow.count():
             self.flow.takeAt(0)
-        for chip in self._chips:          # Qt deletes them later (never while a chip's own x is being clicked)
+        for chip in self._chips:  # Qt deletes them later (never while a chip's own x is being clicked)
             chip.hide()
             chip.deleteLater()
         self._chips = [self._chip(g) for g in self._genres]
@@ -608,7 +676,7 @@ class GenreEditor(QWidget):
 
 # ---- the editor for one book ---------------------------------------------------------------------
 class BookEditor(QWidget):
-    saved = pyqtSignal(dict)          # the book as stored after a save
+    saved = pyqtSignal(dict)  # the book as stored after a save
     save_and_next = pyqtSignal()
     set_filled = pyqtSignal()
 
@@ -640,7 +708,7 @@ class BookEditor(QWidget):
             edit = GenreEditor() if name == "genre" else QLineEdit()
             edit.textEdited.connect(self._changed)
             self.fields[name] = edit
-            if name in ("year", "pages"):                       # short numbers: short boxes
+            if name in ("year", "pages"):  # short numbers: short boxes
                 edit.setMaximumWidth(140)
             if name == "isbn13":
                 edit.setMaximumWidth(260)
@@ -676,7 +744,7 @@ class BookEditor(QWidget):
         self.market_link = QLabel("")
         self.market_link.setOpenExternalLinks(True)
         self.market_link.setTextFormat(Qt.TextFormat.RichText)
-        self.market_link.setWordWrap(False)        # wrapping made Qt reserve extra height above and below it
+        self.market_link.setWordWrap(False)  # wrapping made Qt reserve extra height above and below it
         self.market_link.setObjectName("muted")
         market_row = hbox()
         market_row.addWidget(self.market_price)
@@ -724,8 +792,9 @@ class BookEditor(QWidget):
         price_row.addWidget(QLabel("Currency"))
         price_row.addWidget(self.currency)
         self.ratio_btn = QPushButton(f"= {cfg.price_ratio:.0%} of market")
-        self.ratio_btn.setToolTip(f"Your price = market price x {cfg.price_ratio:g}, in the market price's currency "
-                                  "(PRICE_RATIO in .env)")
+        self.ratio_btn.setToolTip(
+            f"Your price = market price x {cfg.price_ratio:g}, in the market price's currency (PRICE_RATIO in .env)"
+        )
         self.ratio_btn.clicked.connect(self.use_ratio)
         price_row.addWidget(self.ratio_btn)
         price_row.addStretch(1)
@@ -785,10 +854,12 @@ class BookEditor(QWidget):
         self.sell_mode.addItem("As one product - all its books together", "set")
         self.sell_mode.addItem("Each book on its own - a product per book", "book")
         self.sell_mode.setMinimumWidth(320)
-        self.sell_mode.setToolTip("Only this set. Each book on its own: in Sell products every book of the set is its "
-                                  "own product - title = the book's title, its own price, photos = its front (cut out "
-                                  "of the set photo) and its back. Can't be changed while the set or one of its books "
-                                  "is listed, ordered or sold.")
+        self.sell_mode.setToolTip(
+            "Only this set. Each book on its own: in Sell products every book of the set is its "
+            "own product - title = the book's title, its own price, photos = its front (cut out "
+            "of the set photo) and its back. Can't be changed while the set or one of its books "
+            "is listed, ordered or sold."
+        )
         self.sell_mode.activated.connect(self._sell_mode_chosen)
         mode_row = hbox()
         mode_row.addWidget(QLabel("Sell this set:"))
@@ -822,8 +893,9 @@ class BookEditor(QWidget):
         box.addItem(empty_label, "")
         for code, zh, en, grade, meaning, meaning_zh in CONDITION_GRADES:
             box.addItem(f"{zh}  {en}", code)
-            box.setItemData(box.count() - 1, f"TAAZE grade {grade}: {meaning}\n{meaning_zh}",
-                            Qt.ItemDataRole.ToolTipRole)
+            box.setItemData(
+                box.count() - 1, f"TAAZE grade {grade}: {meaning}\n{meaning_zh}", Qt.ItemDataRole.ToolTipRole
+            )
         return box
 
     # -- showing a book --
@@ -831,8 +903,11 @@ class BookEditor(QWidget):
         self._loading = True
         self.row = row
         self.setEnabled(True)
-        self.heading.setText(f"Book #{row['position']}  ·  {row.get('title') or row.get('isbn13') or 'not identified yet'}"
-                             if row.get("set_id") else row.get("sku", ""))
+        self.heading.setText(
+            f"Book #{row['position']}  ·  {row.get('title') or row.get('isbn13') or 'not identified yet'}"
+            if row.get("set_id")
+            else row.get("sku", "")
+        )
         self.set_box.setTitle(f"Whole set {row.get('set_id') or ''}  ·  batch {row.get('batch') or ''}")
         self.set_box.setVisible(bool(row.get("set_id")))
         self._show_sell_mode(row)
@@ -861,20 +936,32 @@ class BookEditor(QWidget):
             set_bad(widget, name in bad)
         if issues:
             self.issues.setVisible(True)
-            self.issues.setText("<ul style='margin:0; padding-left:14px'>"
-                                + "".join(f"<li>{html.escape(i['msg'])}</li>" for i in issues) + "</ul>")
+            self.issues.setText(
+                "<ul style='margin:0; padding-left:14px'>"
+                + "".join(f"<li>{html.escape(i['msg'])}</li>" for i in issues)
+                + "</ul>"
+            )
             self.status.setText(f"<span style='color:{RED}; font-weight:600'>● {len(issues)} thing(s) to fix</span>")
         elif row.get("to_check"):
             self.issues.setVisible(False)
             self.issues.setText("")
-            self.status.setText(f"<span style='color:{AMBER}; font-weight:600'>● To check: are the photos the same "
-                                "book, title, condition and price right? Then Save</span>")
+            self.status.setText(
+                f"<span style='color:{AMBER}; font-weight:600'>● To check: are the photos the same "
+                "book, title, condition and price right? Then Save</span>"
+            )
         else:
             self.issues.setVisible(False)
             self.issues.setText("")
-            word = {"listed": "On sale (its set is listed)", "sold": "Sold"}.get(row.get("status"),
-                                                                               "Checked - ready to sell")
+            word = {"listed": "On sale (its set is listed)", "sold": "Sold"}.get(
+                row.get("status"), "Checked - ready to sell"
+            )
             self.status.setText(f"<span style='color:{GREEN}; font-weight:600'>● {word}</span>")
+
+    def _open_photo(self, p: dict) -> None:
+        """One photo big, in its own window (fit to the window, zoom in and out)."""
+        PhotoViewer(
+            self.cfg, p["path"], p["label"], self, p.get("pos", 0), p.get("numbered", False), p.get("mark", 0)
+        ).exec()
 
     def _show_photos(self, row: dict) -> None:
         while self.photos.count():
@@ -886,9 +973,7 @@ class BookEditor(QWidget):
             box = QVBoxLayout()
             box.setSpacing(4)
             thumb = Thumb(p["label"])
-            thumb.clicked.connect(lambda path=p["path"], label=p["label"], pos=p.get("pos", 0),
-                                  num=p.get("numbered", False), mark=p.get("mark", 0):
-                                  PhotoViewer(self.cfg, path, label, self, pos, num, mark).exec())
+            thumb.clicked.connect(lambda p=p: self._open_photo(p))
             caption = QLabel(p["label"])
             caption.setObjectName("caption")
             caption.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -898,10 +983,17 @@ class BookEditor(QWidget):
             box.addWidget(caption)
             holder.setLayout(box)
             self.photos.addWidget(holder)
-            run_in_background(editing.thumbnail_bytes, self.cfg, p["path"], 400, p.get("pos", 0),
-                              p.get("numbered", False), p.get("mark", 0),
-                              on_done=lambda data, t=thumb, s=sku: self._thumb_ready(t, s, data),
-                              on_fail=lambda m, t=thumb: alive(t) and t.setText("photo\nmissing"))
+            run_in_background(
+                editing.thumbnail_bytes,
+                self.cfg,
+                p["path"],
+                400,
+                p.get("pos", 0),
+                p.get("numbered", False),
+                p.get("mark", 0),
+                on_done=lambda data, t=thumb, s=sku: self._thumb_ready(t, s, data),
+                on_fail=lambda m, t=thumb: alive(t) and t.setText("photo\nmissing"),
+            )
 
     def _thumb_ready(self, thumb: "Thumb", sku: str, data: bytes) -> None:
         if self.row.get("sku") == sku and alive(thumb):
@@ -914,23 +1006,38 @@ class BookEditor(QWidget):
 
     def _show_market_link(self) -> None:
         src, url = self._market_extra.get("market_source", ""), self._market_extra.get("market_url", "")
-        text = f"<a href='{html.escape(url, quote=True)}'>{html.escape(src or 'shop page')}</a>" if url else html.escape(src)
+        text = (
+            f"<a href='{html.escape(url, quote=True)}'>{html.escape(src or 'shop page')}</a>"
+            if url
+            else html.escape(src)
+        )
         text = f"Source: {text}" if text else ""
         match = self._market_extra.get("market_match", "")
-        if match in ("similar", "ebook"):   # not this exact book: say so plainly
-            what = ("price of ANOTHER EDITION (same title and author)" if match == "similar"
-                    else "price of the E-BOOK (same ISBN)")
+        if match in ("similar", "ebook"):  # not this exact book: say so plainly
+            what = (
+                "price of ANOTHER EDITION (same title and author)"
+                if match == "similar"
+                else "price of the E-BOOK (same ISBN)"
+            )
             text += f"<br><b style='color:#b45309'>Note: {what} - check it</b>"
         show_note(self.market_link, text)
 
     def _set_basis(self, basis: str) -> None:
         self._basis = basis or ""
-        show_note(self.basis, {"": "", "manual": "price typed by you", "caption": "price from the Telegram caption"}
-                  .get(self._basis, f"auto: {self._basis}"))
+        show_note(
+            self.basis,
+            {"": "", "manual": "price typed by you", "caption": "price from the Telegram caption"}.get(
+                self._basis, f"auto: {self._basis}"
+            ),
+        )
 
     def _market_typed(self, *_):
-        self._market_extra = {"market_source": "typed by you", "market_url": "", "market_match": "manual",
-                              "market_isbn": ""}
+        self._market_extra = {
+            "market_source": "typed by you",
+            "market_url": "",
+            "market_match": "manual",
+            "market_isbn": "",
+        }
         self._show_market_link()
 
     def _price_typed(self, *_):
@@ -967,8 +1074,13 @@ class BookEditor(QWidget):
         self.lookup_btn.setEnabled(False)
         self.lookup_btn.setText("Looking...")
         sku = self.row.get("sku")
-        run_in_background(editing.lookup_fields, self.cfg, isbn,
-                          on_done=lambda res: self._lookup_done(res, sku), on_fail=self._lookup_failed)
+        run_in_background(
+            editing.lookup_fields,
+            self.cfg,
+            isbn,
+            on_done=lambda res: self._lookup_done(res, sku),
+            on_fail=self._lookup_failed,
+        )
 
     def _lookup_done(self, res: dict, sku: str) -> None:
         self.lookup_btn.setEnabled(True)
@@ -992,7 +1104,9 @@ class BookEditor(QWidget):
                 filled += 1
         self._changed()
         note = f"  {res['market_note']}" if res.get("market_note") else ""
-        self.message.setText(f"Found via {res.get('source') or '-'}: filled {filled} empty field(s). Check, then Save.{note}")
+        self.message.setText(
+            f"Found via {res.get('source') or '-'}: filled {filled} empty field(s). Check, then Save.{note}"
+        )
 
     def _apply_market(self, fields: dict, overwrite: bool) -> int:
         """Put market price fields (and, if the price is still empty, the suggested price) into the form."""
@@ -1000,8 +1114,9 @@ class BookEditor(QWidget):
         if fields.get("market_price") and (overwrite or not self.market_price.text().strip()):
             self.market_price.setText(fields["market_price"])
             self.market_currency.setText(fields.get("market_currency", "TWD"))
-            self._market_extra = {k: fields.get(k, "") for k in ("market_source", "market_url", "market_match",
-                                                                  "market_isbn")}
+            self._market_extra = {
+                k: fields.get(k, "") for k in ("market_source", "market_url", "market_match", "market_isbn")
+            }
             self._show_market_link()
             n += 1
         if fields.get("suggested_price") and not self.price.text().strip() and self.cfg.auto_price:
@@ -1030,12 +1145,14 @@ class BookEditor(QWidget):
             self.find_btn.setEnabled(True)
             self.find_btn.setText("Find")
             self.message.setText(f"Market price look up failed: {msg}")
+
         author = self.fields["author"].text().strip() if "author" in self.fields else ""
         # you asked for it: search again now (a "not found" remembered from processing is not repeated)
         run_in_background(editing.market_for, self.cfg, isbn, title, False, author, on_done=done, on_fail=failed)
 
     def search_web(self) -> None:
         from ..sources.websearch import browser_search_url
+
         isbn = self.fields["isbn13"].text().strip()
         if not isbn:
             self.message.setText("Type the ISBN first.")
@@ -1045,7 +1162,9 @@ class BookEditor(QWidget):
         except ValueError as exc:
             self.message.setText(str(exc))
             return
-        self.message.setText("Search opened in your browser: copy the product link, paste it into 'Shop link', press Use link.")
+        self.message.setText(
+            "Search opened in your browser: copy the product link, paste it into 'Shop link', press Use link."
+        )
 
     def use_link(self) -> None:
         url, isbn = self.link_edit.text().strip(), self.fields["isbn13"].text()
@@ -1067,6 +1186,7 @@ class BookEditor(QWidget):
             self.link_btn.setEnabled(True)
             self.link_btn.setText("Use link")
             self.message.setText(f"Could not read that link: {msg}")
+
         run_in_background(editing.market_from_link, self.cfg, url, isbn, on_done=done, on_fail=failed)
 
     def use_ratio(self) -> None:
@@ -1100,13 +1220,18 @@ class BookEditor(QWidget):
             products = editing.set_sell_mode(self.cfg, self.row["batch"], self.row["set_id"], mode)
         except Exception as exc:
             QMessageBox.warning(self, "Not changed", str(exc))
-            self._show_sell_mode(self.row)                     # back to how it is sold now
+            self._show_sell_mode(self.row)  # back to how it is sold now
             return
         self.row["sell_as"] = "book" if mode == "book" else ""
-        self.message.setText(f"Set {self.row['set_id']}: " + (
-            f"each book is its own product now ({len(products)} in Sell products)" if mode == "book"
-            else "sold as one product again"))
-        self.set_filled.emit()                                  # the list shows the new way of selling
+        self.message.setText(
+            f"Set {self.row['set_id']}: "
+            + (
+                f"each book is its own product now ({len(products)} in Sell products)"
+                if mode == "book"
+                else "sold as one product again"
+            )
+        )
+        self.set_filled.emit()  # the list shows the new way of selling
 
     def fill_set(self) -> None:
         if not self.row.get("set_id"):
@@ -1114,9 +1239,14 @@ class BookEditor(QWidget):
         if self.dirty and not self.save():
             return
         try:
-            n = editing.fill_set(self.cfg, self.row["batch"], self.row["set_id"],
-                                 self.set_condition.currentData() or "", self.set_price.text(),
-                                 self.set_currency.text())
+            n = editing.fill_set(
+                self.cfg,
+                self.row["batch"],
+                self.row["set_id"],
+                self.set_condition.currentData() or "",
+                self.set_price.text(),
+                self.set_currency.text(),
+            )
         except Exception as exc:
             QMessageBox.warning(self, "Not saved", str(exc))
             return
@@ -1126,8 +1256,14 @@ class BookEditor(QWidget):
 
 # ---- the products you sell (sets of books) -------------------------------------------------------------------------
 STATUS_COLOURS = {"draft": RED, "ready": AMBER, "listed": GREEN, "reserved": BLUE, "sold": MUTED, "withdrawn": MUTED}
-STATUS_WORDS = {"draft": "Not ready", "ready": "Ready for Shopee", "listed": "Listed", "reserved": "Ordered",
-             "sold": "Sold", "withdrawn": "Withdrawn"}
+STATUS_WORDS = {
+    "draft": "Not ready",
+    "ready": "Ready for Shopee",
+    "listed": "Listed",
+    "reserved": "Ordered",
+    "sold": "Sold",
+    "withdrawn": "Withdrawn",
+}
 
 
 def product_name(st: dict) -> str:
@@ -1148,7 +1284,8 @@ class SellWindow(QDialog):
     Shopee. For the chosen product: its listing title,
     total price and description (all editable; your text is then kept), its Shopee status / link / order, buttons to
     change its status by hand, and - at the top - 'Make Shopee upload file' for every set that is ready."""
-    changed = pyqtSignal()            # books may have changed status (listed / sold): the main list reloads
+
+    changed = pyqtSignal()  # books may have changed status (listed / sold): the main list reloads
 
     def __init__(self, cfg: Config, parent=None):
         super().__init__(parent)
@@ -1161,20 +1298,26 @@ class SellWindow(QDialog):
         # header: what this window is, and its main action
         heading = QLabel("Sell products")
         heading.setObjectName("heading")
-        intro = QLabel("Each product - here a set of books - is one Shopee listing. Check its title, price and "
-                       "description, then make the upload file for every product that is ready. When an order "
-                       "comes in, read Shopee's order report here too.")
+        intro = QLabel(
+            "Each product - here a set of books - is one Shopee listing. Check its title, price and "
+            "description, then make the upload file for every product that is ready. When an order "
+            "comes in, read Shopee's order report here too."
+        )
         intro.setObjectName("muted")
         intro.setWordWrap(True)
         self.report_btn = QPushButton("Read Shopee report...")
-        self.report_btn.setToolTip("Choose the order report (or product list) you exported from Seller Center: "
-                                   "ordered products become reserved, completed orders sold, cancelled ones go back "
-                                   "on sale")
+        self.report_btn.setToolTip(
+            "Choose the order report (or product list) you exported from Seller Center: "
+            "ordered products become reserved, completed orders sold, cancelled ones go back "
+            "on sale"
+        )
         self.report_btn.clicked.connect(self.read_report)
         self.upload_btn = primary(QPushButton(UPLOAD_TEXT))
-        self.upload_btn.setToolTip("Makes Shopee's upload file (from your template) for every ready product, puts "
-                                   "their photos online if photo links are set up, and opens the uploads folder. "
-                                   "Also reads any Shopee report waiting in the import folder.")
+        self.upload_btn.setToolTip(
+            "Makes Shopee's upload file (from your template) for every ready product, puts "
+            "their photos online if photo links are set up, and opens the uploads folder. "
+            "Also reads any Shopee report waiting in the import folder."
+        )
         self.upload_btn.clicked.connect(self.make_upload)
         head_text = QVBoxLayout()
         head_text.setSpacing(2)
@@ -1213,8 +1356,10 @@ class SellWindow(QDialog):
         self.discount = QLineEdit()
         self.discount.setMaximumWidth(80)
         self.discount.setAlignment(Qt.AlignmentFlag.AlignRight)
-        self.discount.setToolTip("Percent off the original price, e.g. 20 (= 8 折) - for a set, SET_DISCOUNT unless "
-                                 "you change it; a single book: none. The price follows. Saved with 'Save product'.")
+        self.discount.setToolTip(
+            "Percent off the original price, e.g. 20 (= 8 折) - for a set, SET_DISCOUNT unless "
+            "you change it; a single book: none. The price follows. Saved with 'Save product'."
+        )
         self.discount.textEdited.connect(self._discount_typed)
         self.price = QLineEdit()
         self.price.setObjectName("setPrice")
@@ -1222,7 +1367,7 @@ class SellWindow(QDialog):
         self.price.setAlignment(Qt.AlignmentFlag.AlignRight)
         self.price.setToolTip("What it sells for, in TWD. The discount follows. Saved with 'Save product'.")
         self.price.textEdited.connect(self._price_typed)
-        self._price_by = ""             # "discount" / "price": the one you typed last (the other follows it)
+        self._price_by = ""  # "discount" / "price": the one you typed last (the other follows it)
         discount_row = hbox()
         discount_row.addWidget(self.discount)
         discount_row.addWidget(QLabel("% off the whole set"))
@@ -1240,9 +1385,14 @@ class SellWindow(QDialog):
         # how many you have, and the fewest a buyer may order (Shopee's 庫存 / 最低購買數量) - both 1 for a set
         self.stock = QLineEdit()
         self.min_purchase = QLineEdit()
-        for w, tip in ((self.stock, "Stock (庫存): how many of this product you have - 1 for a set"),
-                       (self.min_purchase, "Minimum purchase quantity (最低購買數量): the fewest a buyer may order "
-                                           "at once. 1 to 999,999, and not more than the stock")):
+        for w, tip in (
+            (self.stock, "Stock (庫存): how many of this product you have - 1 for a set"),
+            (
+                self.min_purchase,
+                "Minimum purchase quantity (最低購買數量): the fewest a buyer may order "
+                "at once. 1 to 999,999, and not more than the stock",
+            ),
+        ):
             w.setMaximumWidth(90)
             w.setAlignment(Qt.AlignmentFlag.AlignRight)
             w.setToolTip(tip)
@@ -1297,8 +1447,12 @@ class SellWindow(QDialog):
         link_row.addWidget(self.link_btn)
         self.status_box = flat_combo(QComboBox())
         self.status_box.setMinimumWidth(300)
-        for st, words in (("ready", "Ready - put it in the next upload file"), ("listed", "Listed (by hand)"),
-                          ("sold", "Sold (elsewhere / in person)"), ("withdrawn", "Withdrawn - not for sale")):
+        for st, words in (
+            ("ready", "Ready - put it in the next upload file"),
+            ("listed", "Listed (by hand)"),
+            ("sold", "Sold (elsewhere / in person)"),
+            ("withdrawn", "Withdrawn - not for sale"),
+        ):
             self.status_box.addItem(words, st)
         self.status_btn = QPushButton("Change status")
         self.status_btn.clicked.connect(self.change_status)
@@ -1307,12 +1461,15 @@ class SellWindow(QDialog):
         status_row.addWidget(self.status_btn)
         status_row.addStretch(1)
         self.photos_btn = QPushButton("Open its photos")
-        self.photos_btn.setToolTip("The folder with this product's photos (01.jpg ...) - to drag into Seller Center "
-                                   "when they have no links")
+        self.photos_btn.setToolTip(
+            "The folder with this product's photos (01.jpg ...) - to drag into Seller Center when they have no links"
+        )
         self.photos_btn.clicked.connect(self.open_photos)
         self.again_btn = QPushButton("Make a new upload file for it")
-        self.again_btn.setToolTip("Shopee rejected it, or you deleted it there? Puts this product into a new upload "
-                                  "file (with what you changed here)")
+        self.again_btn.setToolTip(
+            "Shopee rejected it, or you deleted it there? Puts this product into a new upload "
+            "file (with what you changed here)"
+        )
         self.again_btn.clicked.connect(self.upload_again)
         more_row = hbox()
         more_row.addWidget(self.photos_btn)
@@ -1351,8 +1508,8 @@ class SellWindow(QDialog):
         outer = QVBoxLayout(self)
         outer.setContentsMargins(16, 14, 16, 16)
         outer.setSpacing(12)
-        outer.addLayout(header)                 # takes only the height it needs ...
-        outer.addWidget(split, 1)               # ... the products get all the rest
+        outer.addLayout(header)  # takes only the height it needs ...
+        outer.addWidget(split, 1)  # ... the products get all the rest
         no_default_buttons(self)
         self.link_edit.returnPressed.connect(self.save_link)
         self.reload()
@@ -1369,11 +1526,14 @@ class SellWindow(QDialog):
         select = None
         for st in self.products:
             count = "one book" if st.get("kind") == "book" else f"{st.get('book_count')} books"
-            item = QTreeWidgetItem([f"{product_name(st)}\n"
-                                    f"{STATUS_WORDS.get(st['status'], st['status'])}  ·  {count}  ·  "
-                                    f"NT${st.get('price') or '-'}"
-                                    + (f"  ({st['discount']}% off)" if st.get("discount") not in ("", "0", None)
-                                       else "")])
+            item = QTreeWidgetItem(
+                [
+                    f"{product_name(st)}\n"
+                    f"{STATUS_WORDS.get(st['status'], st['status'])}  ·  {count}  ·  "
+                    f"NT${st.get('price') or '-'}"
+                    + (f"  ({st['discount']}% off)" if st.get("discount") not in ("", "0", None) else "")
+                ]
+            )
             item.setData(0, Qt.ItemDataRole.UserRole, st["product_code"])
             item.setIcon(0, dot_icon(STATUS_COLOURS.get(st["status"], RED)))
             item.setToolTip(0, st["product_code"])
@@ -1396,15 +1556,17 @@ class SellWindow(QDialog):
         code = current.data(0, Qt.ItemDataRole.UserRole)
         if self.current.get("product_code") != code and self.unsaved():
             if not self._ask_save():
-                def back(p=previous):                # after Qt has finished handling the click
+
+                def back(p=previous):  # after Qt has finished handling the click
                     if p is not None:
                         self.list.blockSignals(True)
                         self.list.setCurrentItem(p)
                         self.list.blockSignals(False)
+
                 QTimer.singleShot(0, back)
                 return
             self.current = {}
-            self.reload(keep=code)                   # the saved text is read back
+            self.reload(keep=code)  # the saved text is read back
             return
         st = next((x for x in self.products if x["product_code"] == code), None)
         if st:
@@ -1415,17 +1577,23 @@ class SellWindow(QDialog):
         st = self.current
         if not st:
             return False
-        return bool(self._price_by) or self.title.text() != (st.get("title") or "") or \
-            self.description.toPlainText() != (st.get("description") or "") or \
-            self.stock.text().strip() != (st.get("stock") or "1") or \
-            self.min_purchase.text().strip() != (st.get("min_purchase") or "1")
+        return (
+            bool(self._price_by)
+            or self.title.text() != (st.get("title") or "")
+            or self.description.toPlainText() != (st.get("description") or "")
+            or self.stock.text().strip() != (st.get("stock") or "1")
+            or self.min_purchase.text().strip() != (st.get("min_purchase") or "1")
+        )
 
     def _ask_save(self) -> bool:
         """The set has unsaved edits: Save / Discard / Cancel. Returns False on Cancel (or if saving failed)."""
         answer = QMessageBox.question(
-            self, "Unsaved changes", "Save your changes to this product first?",
+            self,
+            "Unsaved changes",
+            "Save your changes to this product first?",
             QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel,
-            QMessageBox.StandardButton.Save)
+            QMessageBox.StandardButton.Save,
+        )
         if answer == QMessageBox.StandardButton.Cancel:
             return False
         if answer == QMessageBox.StandardButton.Save:
@@ -1443,10 +1611,13 @@ class SellWindow(QDialog):
             return True
         if not self._ask_save():
             return False
-        self.current = {**self.current, "title": self.title.text(),
-                        "description": self.description.toPlainText(),
-                        "stock": self.stock.text().strip() or "1",
-                        "min_purchase": self.min_purchase.text().strip() or "1"}
+        self.current = {
+            **self.current,
+            "title": self.title.text(),
+            "description": self.description.toPlainText(),
+            "stock": self.stock.text().strip() or "1",
+            "min_purchase": self.min_purchase.text().strip() or "1",
+        }
         return True
 
     def reject(self) -> None:
@@ -1472,7 +1643,7 @@ class SellWindow(QDialog):
         self._price_by = ""
         self.discount.setText(st.get("discount", ""))
         self.price.setText(st.get("price", ""))
-        fixed = st["status"] not in ("draft", "ready")          # listed: the price on Shopee is set
+        fixed = st["status"] not in ("draft", "ready")  # listed: the price on Shopee is set
         self.discount.setReadOnly(fixed)
         self.price.setReadOnly(fixed)
         self._recount_price()
@@ -1488,8 +1659,10 @@ class SellWindow(QDialog):
             if li.get("export_file"):
                 parts.append(f"In upload file: {html.escape(li['export_file'])}")
             if li.get("shopee_order_sn") or li.get("shopee_order_status"):
-                parts.append(f"Order {html.escape(li.get('shopee_order_sn', ''))} "
-                             f"{html.escape(li.get('shopee_order_status', ''))}")
+                parts.append(
+                    f"Order {html.escape(li.get('shopee_order_sn', ''))} "
+                    f"{html.escape(li.get('shopee_order_status', ''))}"
+                )
             if li.get("errors"):
                 parts.append(html.escape(li["errors"]))
             self.listing.setText("<br>".join(parts))
@@ -1498,7 +1671,7 @@ class SellWindow(QDialog):
         self.link_edit.setText("")
         i = self.status_box.findData(st["status"])
         self.status_box.setCurrentIndex(i if i >= 0 else 0)
-        self.again_btn.setEnabled(st["status"] in ("listed", "withdrawn"))   # ready ones go in the next file anyway
+        self.again_btn.setEnabled(st["status"] in ("listed", "withdrawn"))  # ready ones go in the next file anyway
         self.photos_btn.setEnabled((self.cfg.photos_dir / st["product_code"]).is_dir())
         self.message.setText("")
 
@@ -1522,6 +1695,7 @@ class SellWindow(QDialog):
         """Original price - discount = set price. Shown as you type: the discount changes the price, the price
         changes the discount."""
         from .products import discount_for, pct, zhe
+
         st = self.current
         total = self._total()
         self.price_note.setText("")
@@ -1529,8 +1703,11 @@ class SellWindow(QDialog):
             self.original.setText("-  (a book has no TWD price yet)")
             self.zhe.setText("")
             return
-        self.original.setText(f"NT${total:,.0f}  (the book's own price)" if st.get("kind") == "book" else
-                              f"NT${total:,.0f}  (the {st.get('book_count')} books' prices added up)")
+        self.original.setText(
+            f"NT${total:,.0f}  (the book's own price)"
+            if st.get("kind") == "book"
+            else f"NT${total:,.0f}  (the {st.get('book_count')} books' prices added up)"
+        )
         if self._price_by == "price":
             try:
                 price = float(self.price.text().replace(",", "").replace("NT$", "").replace("$", "").strip())
@@ -1548,7 +1725,7 @@ class SellWindow(QDialog):
         else:
             try:
                 txt = self.discount.text().strip()
-                d = pct(txt) if txt else self.cfg.set_discount * 100      # empty = the usual discount (SET_DISCOUNT)
+                d = pct(txt) if txt else self.cfg.set_discount * 100  # empty = the usual discount (SET_DISCOUNT)
                 if not 0 <= d < 100:
                     raise ValueError
             except ValueError:
@@ -1578,9 +1755,13 @@ class SellWindow(QDialog):
             self.quantity_note.setText("")
 
     def _fields(self) -> dict:
-        fields = {"title": self.title.text(), "description": self.description.toPlainText(),
-                  "stock": self.stock.text(), "min_purchase": self.min_purchase.text()}
-        if self._price_by == "discount":                  # only the one you typed: the other follows it
+        fields = {
+            "title": self.title.text(),
+            "description": self.description.toPlainText(),
+            "stock": self.stock.text(),
+            "min_purchase": self.min_purchase.text(),
+        }
+        if self._price_by == "discount":  # only the one you typed: the other follows it
             fields["discount"] = self.discount.text()
         elif self._price_by == "price":
             fields["price"] = self.price.text()
@@ -1606,8 +1787,9 @@ class SellWindow(QDialog):
             self.message.setText("Only a product not yet listed gets automatic text")
             return
         try:
-            editing.save_product(self.cfg, self.current["product_code"],
-                             {"title": "", "discount": "", "price": "", "description": ""})
+            editing.save_product(
+                self.cfg, self.current["product_code"], {"title": "", "discount": "", "price": "", "description": ""}
+            )
         except Exception as exc:
             QMessageBox.warning(self, "Not saved", str(exc))
             return
@@ -1644,7 +1826,7 @@ class SellWindow(QDialog):
     def _shopee(self, button: QPushButton, fn, *args) -> None:
         """Run a Shopee step in the background (button shows 'Working...'), then show what happened; an upload file
         made -> its folder opens."""
-        if not self._settle():               # what you typed goes into the file, not the older text
+        if not self._settle():  # what you typed goes into the file, not the older text
             return
         words = button.text()
         for b in (self.upload_btn, self.report_btn, self.again_btn):
@@ -1667,6 +1849,7 @@ class SellWindow(QDialog):
         def failed(msg: str):
             finish()
             QMessageBox.warning(self, "Shopee", msg)
+
         run_in_background(fn, self.cfg, *args, on_done=done, on_fail=failed)
 
     def make_upload(self) -> None:
@@ -1678,8 +1861,11 @@ class SellWindow(QDialog):
 
     def read_report(self) -> None:
         files, _ = QFileDialog.getOpenFileNames(
-            self, "Shopee's order report or product list", str(Path.home() / "Downloads"),
-            "Shopee files (*.xlsx *.xls *.csv);;All files (*)")
+            self,
+            "Shopee's order report or product list",
+            str(Path.home() / "Downloads"),
+            "Shopee files (*.xlsx *.xls *.csv);;All files (*)",
+        )
         if files:
             self._shopee(self.report_btn, editing.shopee_read, files)
 
@@ -1696,7 +1882,7 @@ class ReviewWindow(QMainWindow):
         super().__init__()
         self.cfg = cfg
         self.rows: list = []
-        self.folded: set = set()           # sets you folded closed (kept across refreshes)
+        self.folded: set = set()  # sets you folded closed (kept across refreshes)
         self._csv_mtime = self._mtime()
         self.setWindowTitle(f"Book review - {cfg.csv_path.resolve()}")
         self.resize(screen_size(self, 0.9))
@@ -1712,8 +1898,10 @@ class ReviewWindow(QMainWindow):
         self.refresh_btn.setToolTip("Read books.csv again (new books from the bot appear by themselves too)")
         self.refresh_btn.clicked.connect(lambda: self.reload())
         self.sell_btn = primary(QPushButton("Sell products  (Ctrl+L)"))
-        self.sell_btn.setToolTip("Every product (set of books) for Shopee: title, total price, description, status; "
-                                 "make the Shopee upload file")
+        self.sell_btn.setToolTip(
+            "Every product (set of books) for Shopee: title, total price, description, status; "
+            "make the Shopee upload file"
+        )
         self.sell_btn.clicked.connect(self.open_sell)
         self.sell_window = None
         self.banner = QLabel("")
@@ -1729,8 +1917,8 @@ class ReviewWindow(QMainWindow):
         self.list.setHeaderHidden(True)
         self.list.setMinimumWidth(340)
         self.list.setUniformRowHeights(False)
-        self.list.setExpandsOnDoubleClick(False)     # one click on a set folds / unfolds it
-        self.list.setRootIsDecorated(False)          # the set's own ▾ / ▸ shows whether it is open
+        self.list.setExpandsOnDoubleClick(False)  # one click on a set folds / unfolds it
+        self.list.setRootIsDecorated(False)  # the set's own ▾ / ▸ shows whether it is open
         self.list.setIndentation(16)
         self.list.currentItemChanged.connect(self._select)
         self.list.itemClicked.connect(self._clicked)
@@ -1817,7 +2005,7 @@ class ReviewWindow(QMainWindow):
             font = QFont()
             font.setBold(True)
             top.setFont(0, font)
-            top.setFlags(Qt.ItemFlag.ItemIsEnabled)          # a set is a heading: click it to fold / unfold
+            top.setFlags(Qt.ItemFlag.ItemIsEnabled)  # a set is a heading: click it to fold / unfold
             self.list.addTopLevelItem(top)
             for r in sorted(books, key=lambda b: int(b.get("position") or 0)):
                 item = QTreeWidgetItem([self._item_text(r)])
@@ -1840,8 +2028,9 @@ class ReviewWindow(QMainWindow):
         else:
             self.editor.row = {}
             self.editor.setEnabled(False)
-            self.editor.heading.setText("Nothing left to check - press 'Sell products'" if not self.show_all.isChecked()
-                                        else "No books yet")
+            self.editor.heading.setText(
+                "Nothing left to check - press 'Sell products'" if not self.show_all.isChecked() else "No books yet"
+            )
 
     def _update_set_item(self, top) -> None:
         key = top.data(0, SET_ROLE)
@@ -1854,9 +2043,15 @@ class ReviewWindow(QMainWindow):
         parts += [f"{amber} to check"] if amber else []
         arrow = "▾" if top.isExpanded() else "▸"
         per_book = any((r.get("sell_as") or "") == "book" for r in books)
-        top.setText(0, f"{arrow}  " + (f"Set {set_id}  ·  batch {batch}" if batch else key) + "\n"
-                    + f"     {len(books)} book(s)" + (f"  ·  {', '.join(parts)}" if parts else "  ·  all checked")
-                    + ("  ·  sold per book" if per_book else ""))
+        top.setText(
+            0,
+            f"{arrow}  "
+            + (f"Set {set_id}  ·  batch {batch}" if batch else key)
+            + "\n"
+            + f"     {len(books)} book(s)"
+            + (f"  ·  {', '.join(parts)}" if parts else "  ·  all checked")
+            + ("  ·  sold per book" if per_book else ""),
+        )
         top.setToolTip(0, f"Set code {key} - click to fold / unfold")
         top.setIcon(0, dot_icon(RED if red else AMBER if amber else GREEN))
 
@@ -1881,9 +2076,12 @@ class ReviewWindow(QMainWindow):
     def _ask_save(self) -> bool:
         """The current book has unsaved edits: Save / Discard / Cancel. Returns False on Cancel."""
         answer = QMessageBox.question(
-            self, "Unsaved changes", "Save your changes to this book first?",
+            self,
+            "Unsaved changes",
+            "Save your changes to this book first?",
             QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Discard | QMessageBox.StandardButton.Cancel,
-            QMessageBox.StandardButton.Save)
+            QMessageBox.StandardButton.Save,
+        )
         if answer == QMessageBox.StandardButton.Cancel:
             return False
         if answer == QMessageBox.StandardButton.Save:
@@ -1893,22 +2091,24 @@ class ReviewWindow(QMainWindow):
 
     @staticmethod
     def _clicked(item, column=0) -> None:
-        if item.data(0, Qt.ItemDataRole.UserRole) is None:      # a set heading: fold / unfold it
+        if item.data(0, Qt.ItemDataRole.UserRole) is None:  # a set heading: fold / unfold it
             item.setExpanded(not item.isExpanded())
 
     def _select(self, current, previous) -> None:
         if current is None:
             return
         sku = current.data(0, Qt.ItemDataRole.UserRole)
-        if sku is None:                        # a set heading: the editor keeps its book
+        if sku is None:  # a set heading: the editor keeps its book
             return
         if self.editor.row.get("sku") == sku and self.editor.dirty:
             return
         if self.editor.dirty and previous is not None and not self._ask_save():
-            def back(p=previous):                # after Qt has finished handling the click
+
+            def back(p=previous):  # after Qt has finished handling the click
                 self.list.blockSignals(True)
                 self.list.setCurrentItem(p)
                 self.list.blockSignals(False)
+
             QTimer.singleShot(0, back)
             return
         row = next((r for r in self.rows if r["sku"] == sku), None)
@@ -1919,12 +2119,12 @@ class ReviewWindow(QMainWindow):
         for i, r in enumerate(self.rows):
             if r["sku"] == stored["sku"]:
                 self.rows[i] = stored
-        for item in self.book_items():   # not necessarily the current item: 'Save' may come from switching books
+        for item in self.book_items():  # not necessarily the current item: 'Save' may come from switching books
             if item.data(0, Qt.ItemDataRole.UserRole) == stored["sku"]:
                 item.setText(0, self._item_text(stored))
                 item.setIcon(0, dot_icon(self._colour(stored)))
                 self._update_set_item(item.parent())
-        self._csv_mtime = self._mtime()   # our own save is not 'new data'
+        self._csv_mtime = self._mtime()  # our own save is not 'new data'
         self._update_count()
 
     def next_book(self) -> None:
@@ -1962,7 +2162,7 @@ class ReviewWindow(QMainWindow):
 
 def _chevron(path, down: bool = True) -> str:
     """A small arrow picture for the dropdowns (Qt style sheets need an image file for it)."""
-    path = path.resolve()                  # an absolute path: the style sheet must find it from anywhere
+    path = path.resolve()  # an absolute path: the style sheet must find it from anywhere
     pm = QPixmap(24, 24)
     pm.fill(QColor(0, 0, 0, 0))
     p = QPainter(pm)
@@ -1972,7 +2172,9 @@ def _chevron(path, down: bool = True) -> str:
     pen.setCapStyle(Qt.PenCapStyle.RoundCap)
     pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
     p.setPen(pen)
-    p.drawPolyline(*([QPoint(6, 9), QPoint(12, 15), QPoint(18, 9)] if down else [QPoint(9, 6), QPoint(15, 12), QPoint(9, 18)]))
+    p.drawPolyline(
+        *([QPoint(6, 9), QPoint(12, 15), QPoint(18, 9)] if down else [QPoint(9, 6), QPoint(15, 12), QPoint(9, 18)])
+    )
     p.end()
     path.parent.mkdir(parents=True, exist_ok=True)
     if not pm.save(str(path), "PNG"):
@@ -1986,10 +2188,13 @@ def full_style(cfg: Config) -> str:
         arrow = _chevron(cfg.cache_dir / "ui" / "chevron_down.png")
     except Exception:
         return STYLE
-    return STYLE + f"""
+    return (
+        STYLE
+        + f"""
 QComboBox::down-arrow {{ image: url("{arrow}"); width: 12px; height: 12px; }}
 QComboBox::down-arrow:on {{ top: 1px; }}
 """
+    )
 
 
 def run(cfg: Config) -> None:
@@ -2010,9 +2215,10 @@ def run(cfg: Config) -> None:
     app.setStyle(app._clean_style)
     app.setStyleSheet(full_style(cfg))
 
-    def unexpected(kind, value, tb):          # PyQt would otherwise close the whole window on any error
+    def unexpected(kind, value, tb):  # PyQt would otherwise close the whole window on any error
         traceback.print_exception(kind, value, tb)
         QMessageBox.critical(None, "Something went wrong", f"{value}\n\nNothing was lost; try again.")
+
     sys.excepthook = unexpected
     window = ReviewWindow(cfg)
     window.show()

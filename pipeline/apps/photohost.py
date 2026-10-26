@@ -9,6 +9,7 @@ Every photo is uploaded once: its link is kept in <photos folder>/<product code>
 fingerprint of the picture, and reused until the picture changes (so a new upload file does not upload everything
 again). The API key goes in the request body - never in a link.
 """
+
 from __future__ import annotations
 
 import base64
@@ -43,24 +44,31 @@ def _save_links(folder: Path, links: dict) -> None:
 def _imgbb(cfg: Config, path: Path, name: str, http=None) -> str:
     """One photo to ImgBB; returns its direct link. The key travels in the POST body, not the link."""
     if not cfg.imgbb_api_key:
-        raise PhotoHostError("photos online need IMGBB_API_KEY in .env (free: imgbb.com > sign up > "
-                             "api.imgbb.com > Get API key)")
+        raise PhotoHostError(
+            "photos online need IMGBB_API_KEY in .env (free: imgbb.com > sign up > api.imgbb.com > Get API key)"
+        )
     if http is None:
         import requests
+
         http = requests
     data = {"key": cfg.imgbb_api_key, "name": name, "image": base64.b64encode(Path(path).read_bytes()).decode("ascii")}
     try:
         r = http.post(IMGBB_URL, data=data, timeout=120)
     except Exception as exc:
-        raise PhotoHostError(f"ImgBB could not be reached ({type(exc).__name__}) - check the internet connection")
+        raise PhotoHostError(
+            f"ImgBB could not be reached ({type(exc).__name__}) - check the internet connection"
+        ) from exc
     try:
         body = r.json()
     except ValueError:
         body = {}
     if r.status_code != 200 or not body.get("success"):
         why = (body.get("error") or {}).get("message") if isinstance(body.get("error"), dict) else body.get("error")
-        raise PhotoHostError(f"ImgBB refused {Path(path).name} (HTTP {r.status_code}"
-                             + (f": {why}" if why else "") + ") - check IMGBB_API_KEY in .env")
+        raise PhotoHostError(
+            f"ImgBB refused {Path(path).name} (HTTP {r.status_code}"
+            + (f": {why}" if why else "")
+            + ") - check IMGBB_API_KEY in .env"
+        )
     url = (body.get("data") or {}).get("url") or ""
     if not url.startswith("https://"):
         raise PhotoHostError(f"ImgBB gave no link for {Path(path).name}")
@@ -88,5 +96,5 @@ def put_online(cfg: Config, code: str, paths: list, http=None) -> list:
             links[p.name] = {"url": url, "sha1": fp, "host": service}
             out.append(url)
     finally:
-        _save_links(folder, links)              # what did get online is remembered even if a later photo failed
+        _save_links(folder, links)  # what did get online is remembered even if a later photo failed
     return out

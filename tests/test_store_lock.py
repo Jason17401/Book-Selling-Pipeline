@@ -1,8 +1,11 @@
 """books.csv is shared by the bot, the review window and the commands: no program may overwrite another's work."""
+
 import multiprocessing as mp
 import time
 
 from pipeline.core import store
+
+
 def _append_many(path, tag, n):
     for i in range(n):
         store.append_rows(path, [{"sku": f"{tag}-{i}", "status": "needs_manual"}])
@@ -37,11 +40,11 @@ def test_lock_waits_then_gives_a_clear_error(tmp_path):
     except store.FileBusy as exc:
         assert "busy" in str(exc)
     p.join()
-    with store.locked(path, timeout=1):   # free again
+    with store.locked(path, timeout=1):  # free again
         pass
 
 
 def test_lock_is_reentrant_in_one_program(tmp_path):
     path = tmp_path / "books.csv"
     store.update_rows(path, lambda rows: store.append_rows(path, [{"sku": "x"}]) or rows.clear())
-    assert store.read_rows(path) == []   # outer write wins; the point is that it did not deadlock
+    assert store.read_rows(path) == []  # outer write wins; the point is that it did not deadlock

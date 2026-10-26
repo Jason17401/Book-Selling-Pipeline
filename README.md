@@ -13,6 +13,7 @@ finished product, and another reads Shopee's order report back to mark products 
 |---|---|
 | **[SETUP.md](SETUP.md)** | once, first: install, data folders, Telegram bot, keys, first set, Shopee, photo links (~40 minutes) |
 | [TELEGRAM_SETUP.md](TELEGRAM_SETUP.md) | step 3 of the setup: your own Telegram bot (~5 minutes) |
+| [API_KEYS.md](API_KEYS.md) | step 4 of the setup: the four free keys (Google Books, Tavily, LangSearch, ImgBB) - how to get each, what uses it |
 | **[DAILY_USE.md](DAILY_USE.md)** | every day: send → process → review → sell on Shopee; all commands; troubleshooting |
 | [DATA_AND_STATUSES.md](DATA_AND_STATUSES.md) | what is stored where (`books.csv`, `products.csv`, `listings.csv`), condition grades, every status |
 
@@ -74,78 +75,20 @@ Your `.env`, `data` and `.venv` are never part of an update. With the project in
    `Get-ChildItem -Force | Where-Object { '.git','.env','data','.venv' -notcontains $_.Name } | Remove-Item -Recurse -Force`
 3. Copy the **contents** of the new `Book Selling Pipeline` folder from the zip into your folder.
 4. `git add -A`, `git status` (check the list), `git commit -m "Update"`, `git push`.
-5. Double-click **`setup.bat`**: it installs anything new, brings older data files up to date and runs the tests
-   (your `.env` is left as it is). Then `git diff HEAD~1 -- .env.example` shows new or changed settings worth
-   copying into your `.env`.
+5. Double-click **`setup.bat`**: it installs anything new and runs the tests (your `.env` is left as it is). Then
+   `git diff HEAD~1 -- .env.example` shows new or changed settings worth copying into your `.env`.
 
-`books.csv` from an older version is converted the first time it is saved (e.g. the column `source` became
-`book_source`, `barcode_photo` became `back_photo`; `barcode_addon`, `trademe_id`, `ebay_id` and `fb_status` are gone - selling is tracked in `products.csv`
-and `listings.csv`). Books you had marked `listed` / `sold` yourself keep that: their product starts as listed / sold. After an update that cuts covers better, `python -m pipeline covers --redo`
-cuts the covers of books not yet listed again. `python -m pipeline covers` (no `--redo`) makes the front + back pictures
-of books processed before they existed.
+**Settings from older versions.** Your `.env` keeps working; these older values are handled for you, and the lines
+can be tidied whenever you like:
 
-Settings that no longer exist are simply ignored (`SET_SPLIT`, `BACK_ROTATE`, `PHOTO_ORDER`, `GOOGLE_COUNTRY`,
-`BRAVE_API_KEY`, `MARKET_EBOOK`). If your `.env` was made from an older version, check these - your old values
-override the new defaults:
-
-- `BOOK_PROVIDERS_TW=ncl,eslite,books_tw,google,openlibrary` (the old default order `google,ncl,...` is switched to
-  this one automatically)
-- `LOOKUP_STOP_WHEN=title,author,publisher,year,genre`
-- `MARKET_PROVIDERS=barcode,ncl,eslite,books_tw`
-- `SET_DISCOUNT=20%` (older `.env` files say 0) and `SHOPEE_CATEGORY_NAME=其他書籍` (older ones say 二手書, which
-  Shopee doesn't have)
-- `SET_WEIGHT_PER_BOOK_G` is gone (no weight is sent to Shopee any more) - delete the line. A product an older
-  version put in a plain sheet (made without the template) goes back to **ready** and into the next upload file by
-  itself.
-- `SHOPEE_TEMPLATE` should be blank now (the template lives in `data\listings\shopee\template\`, any name). Photo links:
-  `IMGBB_API_KEY` ([SETUP.md step 7](SETUP.md#7-photo-links-photos-online-automatically)).
-
-**"Sets" became "products".** What you sell is now called a *product* (a set of books - later also a single book), so
-the first run after this update converts, once and automatically:
-
-- `data\sets.csv` → `data\products.csv` (`set_code` → `product_code`, `set_title` → `title`, `set_price` → `price`,
-  new column `kind` = `set`); the old file is kept as `data\sets_old.csv`;
-- `data\listings.csv`: `set_code` → `product_code`;
-- `data\listings\shopee\template.xlsx` → `data\listings\shopee\template\template.xlsx`. New upload files go to
-  `data\listings\shopee\uploads\`; older ones stay where they are.
-
-The commands `sets` / `set-status` still work as `products` / `product-status`; the review window's button is
-**Sell products** (`Ctrl+L`).
-
-**New in this version:** the market-price web search first looks for the ISBN alone on eslite.com and books.com.tw
-together (like the Google search the review window opens), with Tavily's more thorough search; a web search that could
-not be made (no internet, quota) is reported and no longer remembered as "not found"; **Find** in the review window
-always searches again; and when no price is found, what was tried is saved in `data\cache\debug\..._market_<isbn>.html`.
-An older `.env` with `WEB_QUERIES=site,shop` gets the new order `isbn,site,shop` automatically.
-
-**Earlier:** book details of Taiwanese books come from the **Chinese sources first** (NCL → eslite →
-books.com.tw, then Google); NCL works again (it now needs a session first - before, every search failed and NCL was
-skipped for the rest of the run); a source that could not be reached is no longer remembered as "not found"; and
-Chinese author / publisher names replace English ones. To fix books already saved with English or missing details:
-`python -m pipeline titles` (books not yet listed).
-
-Also earlier: the condition grades follow TAAZE's own definitions (A-E): `new` 全新, `as_new` 近全新,
-`good` 良好, `fair` 普通, `poor` 差強人意 ([DATA_AND_STATUSES.md](DATA_AND_STATUSES.md#condition-grades)). `like_new`
-became `as_new` - books, captions ("like new" still works) and `DEFAULT_CONDITION=like_new` in an older `.env` are
-converted automatically.
-
-Also earlier: sets are **8 books in a 2 x 4 grid** by default (`SET_SIZE=8`, `GRID=2x4`); photos go online
-on **ImgBB only** (`IMGBB_API_KEY`) - the Cloudflare R2 / S3 option is gone; and **ISBNdb** is no longer a book source.
-Old lines in your `.env` that can go: `PHOTO_HOST`, `IMAGE_PUBLIC_URL`, `S3_ENDPOINT_URL`, `S3_BUCKET`,
-`S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `ISBNDB_API_KEY` (they are ignored), and `isbndb` in `BOOK_PROVIDERS`
-(skipped). The keys still used: `GOOGLE_BOOKS_API_KEY`, `TAVILY_API_KEY`, `LANGSEARCH_API_KEY`, `IMGBB_API_KEY`.
-
-Also earlier: a set can be sold **per book** - review window → the Whole set box → **Sell this set: Each
-book on its own**; Sell products then shows one product per book (title = the book's title, its own price, 2 photos:
-front and back). Only for the sets you choose; the default stays one product per set.
-
-Also earlier: `setup.bat` does the whole install (no more typing the commands); Sell products has
-**Quantity** - in stock (庫存) and minimum purchase (最低購買數量), both 1 by default - and the automatic title is now
-simply `【<code>】二手書8本一套`. Products not yet listed get the new title unless you had typed your own.
-
-**`shopee.bat` is gone** - everything it did is in review → **Sell products**: **Make Shopee upload file** (opens the
-uploads folder when done), **Read Shopee report...** for order reports, and per product **Make a new upload file for
-it** (was `--redo`) and **Open its photos**.
+- `BOOK_PROVIDERS_TW=google,ncl,eslite,books_tw,openlibrary` (the old default) is read as today's
+  `ncl,eslite,books_tw,google,openlibrary` - the Chinese sources first.
+- `WEB_QUERIES=site,shop` (the old default) is read as `isbn,site,shop`.
+- `isbndb` in `BOOK_PROVIDERS` is skipped; `DEFAULT_CONDITION=like_new` means `as_new`.
+- No longer used, delete if present: `ISBNDB_API_KEY`, `PHOTO_HOST`, `IMAGE_PUBLIC_URL`, `S3_ENDPOINT_URL`,
+  `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `SET_WEIGHT_PER_BOOK_G`, `SET_SPLIT`, `BACK_ROTATE`,
+  `PHOTO_ORDER`, `GOOGLE_COUNTRY`, `BRAVE_API_KEY`, `MARKET_EBOOK`.
+- `SHOPEE_TEMPLATE` should be blank: the template lives in `data\listings\shopee\template\` (any file name).
 
 ---
 
@@ -155,14 +98,16 @@ it** (was `--redo`) and **Open its photos**.
 Book Selling Pipeline/
 ├── README.md                        this overview
 ├── SETUP.md, TELEGRAM_SETUP.md      one-time setup
+├── API_KEYS.md                      getting the four free API keys, and what each is used for
 ├── DAILY_USE.md                     the routine, commands, troubleshooting
 ├── DATA_AND_STATUSES.md             what is stored, and every status
 ├── .env.example → .env              settings (your copy: .env)
 ├── setup.bat                        double-click once (and after updates): installs, .env, data folders, tests
 ├── bot.bat, review.bat              double-click launchers for every day
 ├── requirements.txt                 what pip installs (requirements-dev.txt adds pytest)
-├── docs/                            the flow diagram
-├── data/                            made by `python -m pipeline setup` (or any command): inbox, processed photos,
+├── pyproject.toml                   test and code-style settings (pytest, ruff)
+├── docs/                            the flow diagram (pipeline-flow.svg / .png)
+├── data/                            made by setup.bat (or any command): inbox, processed photos,
 │                                    books.csv, products.csv, listings.csv, listings (photos, Shopee template /
 │                                    uploads / import), cache
 ├── tests/                           automated tests (python -m pytest)

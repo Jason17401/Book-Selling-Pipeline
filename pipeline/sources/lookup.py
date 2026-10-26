@@ -1,7 +1,7 @@
 """Book metadata from several providers; later providers only fill gaps.
 
 Providers (names for BOOK_PROVIDERS / BOOK_PROVIDERS_TW in .env):
-  openlibrary         Open Library Books API          free, no key. Identified User-Agent (CONTACT_EMAIL), max ~1 call/s here
+  openlibrary         Open Library Books API          free, no key. Identified User-Agent (CONTACT_EMAIL), ~1 call/s
   openlibrary_search  Open Library Search API         free, no key. Finds some books the Books API misses
   google              Google Books API v1             GOOGLE_BOOKS_API_KEY; counted against GOOGLE_DAILY_LIMIT per day
   eslite              誠品 eslite.com (Taiwan)          unofficial: the JSON search their own website uses
@@ -11,6 +11,7 @@ Providers (names for BOOK_PROVIDERS / BOOK_PROVIDERS_TW in .env):
 Taiwanese ISBNs (978-957, 978-986, 978-626) use BOOK_PROVIDERS_TW, everything else BOOK_PROVIDERS.
 Every answer (including "not found") is cached in data/cache/lookups.json, so re-running costs no quota.
 """
+
 from __future__ import annotations
 
 import json
@@ -21,6 +22,7 @@ from typing import Callable, Optional
 from ..core import net, progress
 from ..core.config import Config
 from ..core.isbn import isbn10_to_13, normalize
+from .taiwan import _year  # one year parser for every source
 
 log = logging.getLogger("pipeline.lookup")
 FIELDS = ("title", "author", "publisher", "year", "pages", "genre")  # stored per book (sources may return more)
@@ -30,11 +32,6 @@ APP_UA = "BookSellingPipeline/1.0"
 
 def is_taiwan(isbn: str) -> bool:
     return str(isbn).startswith(TW_PREFIXES)
-
-
-def _year(s) -> str:
-    m = re.search(r"\b(1[5-9]\d\d|20\d\d)\b", str(s or ""))
-    return m.group(1) if m else ""
 
 
 def _clean(v):
@@ -55,11 +52,17 @@ def from_openlibrary(isbn: str, cfg: Config) -> dict:
     """Open Library Books API. Example (paste into a browser):
         GET https://openlibrary.org/api/books?bibkeys=ISBN:9781451648546&format=json&jscmd=data
         header: User-Agent: BookSellingPipeline/1.0 (you@example.com)
-    Reply: {"ISBN:9781451648546": {"title": ..., "authors": [{"name": ...}], "publishers": [...], ...}} or {} if unknown.
+    Reply: {"ISBN:9781451648546": {"title": ..., "authors": [{"name": ...}], "publishers": [...], ...}}, or {} if
+    unknown.
     """
-    data = net.request("openlibrary", "GET", "https://openlibrary.org/api/books",
-                       params={"bibkeys": f"ISBN:{isbn}", "format": "json", "jscmd": "data"},
-                       headers=_ol_headers(cfg), min_interval=1.0)
+    data = net.request(
+        "openlibrary",
+        "GET",
+        "https://openlibrary.org/api/books",
+        params={"bibkeys": f"ISBN:{isbn}", "format": "json", "jscmd": "data"},
+        headers=_ol_headers(cfg),
+        min_interval=1.0,
+    )
     d = (data or {}).get(f"ISBN:{isbn}")
     if not d:
         return {}
@@ -83,10 +86,17 @@ def from_openlibrary_search(isbn: str, cfg: Config) -> dict:
     Reply: {"docs": [{"title": ..., "author_name": [...], "isbn": [... every ISBN of the work ...]}]}
     Only a doc whose isbn list contains OUR ISBN is used.
     """
-    data = net.request("openlibrary", "GET", "https://openlibrary.org/search.json",
-                       params={"q": isbn, "limit": 3,
-                               "fields": "title,subtitle,author_name,publisher,isbn,cover_i"},
-                       headers=_ol_headers(cfg), min_interval=1.0) or {}
+    data = (
+        net.request(
+            "openlibrary",
+            "GET",
+            "https://openlibrary.org/search.json",
+            params={"q": isbn, "limit": 3, "fields": "title,subtitle,author_name,publisher,isbn,cover_i"},
+            headers=_ol_headers(cfg),
+            min_interval=1.0,
+        )
+        or {}
+    )
     for d in data.get("docs", []):
         if isbn not in (d.get("isbn") or [isbn]):  # guard against a loose match
             continue
@@ -95,15 +105,21 @@ def from_openlibrary_search(isbn: str, cfg: Config) -> dict:
             title = f"{title}: {d['subtitle']}"
         cover = f"https://covers.openlibrary.org/b/id/{d['cover_i']}-L.jpg" if d.get("cover_i") else ""
         # first_publish_year / page counts here describe the WORK, not this edition, so they are left blank on purpose
-        return {"title": title, "author": ", ".join(d.get("author_name", [])),
-                "publisher": ", ".join((d.get("publisher") or [])[:2]), "cover_url": cover}
+        return {
+            "title": title,
+            "author": ", ".join(d.get("author_name", [])),
+            "publisher": ", ".join((d.get("publisher") or [])[:2]),
+            "cover_url": cover,
+        }
     return {}
 
 
 # ---- Google Books ------------------------------------------------------------------------------
 GOOGLE_URL = "https://www.googleapis.com/books/v1/volumes"
-GOOGLE_FIELDS = ("totalItems,items(id,volumeInfo(title,subtitle,authors,publisher,publishedDate,pageCount,printType,"
-                 "industryIdentifiers,categories))")
+GOOGLE_FIELDS = (
+    "totalItems,items(id,volumeInfo(title,subtitle,authors,publisher,publishedDate,pageCount,printType,"
+    "industryIdentifiers,categories))"
+)
 
 
 def _google_isbns(v: dict) -> set:
@@ -115,8 +131,9 @@ def _google_isbns(v: dict) -> set:
     return out
 
 
-GOOGLE_VOLUME_FIELDS = ("id,volumeInfo(title,subtitle,authors,publisher,publishedDate,pageCount,printType,"
-                        "industryIdentifiers,categories)")
+GOOGLE_VOLUME_FIELDS = (
+    "id,volumeInfo(title,subtitle,authors,publisher,publishedDate,pageCount,printType,industryIdentifiers,categories)"
+)
 GOOGLE_LINKS_URL = "https://books.google.com/books"
 _JSONP_RE = re.compile(r"^[^(]*\((.*)\)\s*;?\s*$", re.S)
 
@@ -157,13 +174,20 @@ def parse_google_links(text: str, isbn: str) -> str:
 
 
 def google_volume_id(isbn: str, cfg: Config) -> str:
-    """ISBN -> Google volume id with Google's 'Dynamic Links' service (documented, no key, NOT counted in the API quota):
+    """ISBN -> Google volume id with Google's 'Dynamic Links' service (documented, no key, NOT counted in the API
+    quota):
         GET https://books.google.com/books?bibkeys=ISBN:9781451648546&jscmd=viewapi&callback=cb
-        reply: cb({"ISBN:9781451648546": {"info_url": "https://books.google.com/books?id=8U2oAAAAQBAJ&source=gbs_ViewAPI", ...}});
+        reply: cb({"ISBN:9781451648546": {"info_url": "https://books.google.com/books?id=8U2oAAAAQBAJ&...", ...}});
     This is the same lookup that powers the book's web page, and it works when the API's isbn: search returns 0."""
-    text = net.request("google_links", "GET", GOOGLE_LINKS_URL,
-                       params={"bibkeys": f"ISBN:{isbn}", "jscmd": "viewapi", "callback": "cb"},
-                       headers={"User-Agent": f"{APP_UA} ({cfg.contact_email})"}, min_interval=1.0, expect="text")
+    text = net.request(
+        "google_links",
+        "GET",
+        GOOGLE_LINKS_URL,
+        params={"bibkeys": f"ISBN:{isbn}", "jscmd": "viewapi", "callback": "cb"},
+        headers={"User-Agent": f"{APP_UA} ({cfg.contact_email})"},
+        min_interval=1.0,
+        expect="text",
+    )
     return parse_google_links(text or "", isbn)
 
 
@@ -172,6 +196,7 @@ def _google_result(v: dict) -> dict:
     if v.get("subtitle"):
         title = f"{title}: {v['subtitle']}"
     from .genre import from_path
+
     cats = v.get("categories") or []
     return {
         "title": title,
@@ -179,7 +204,7 @@ def _google_result(v: dict) -> dict:
         "publisher": v.get("publisher", ""),
         "year": _year(v.get("publishedDate")),
         "pages": v.get("pageCount"),
-        "genre": from_path(cats[0]) if cats else "",      # 'Juvenile Fiction / Action & Adventure / General'
+        "genre": from_path(cats[0]) if cats else "",  # 'Juvenile Fiction / Action & Adventure / General'
     }
 
 
@@ -247,18 +272,25 @@ def from_google(isbn: str, cfg: Config, counter: Optional[net.DailyCounter] = No
 def _taiwan(name):
     def call(isbn, cfg):
         from . import taiwan
+
         return getattr(taiwan, name)(isbn, cfg)
+
     call.__name__ = name
     return call
 
 
-PROVIDERS: dict = {"openlibrary": from_openlibrary, "openlibrary_search": from_openlibrary_search,
-                   "google": from_google,
-                   "eslite": _taiwan("from_eslite"), "books_tw": _taiwan("from_books_tw"), "ncl": _taiwan("from_ncl")}
+PROVIDERS: dict = {
+    "openlibrary": from_openlibrary,
+    "openlibrary_search": from_openlibrary_search,
+    "google": from_google,
+    "eslite": _taiwan("from_eslite"),
+    "books_tw": _taiwan("from_books_tw"),
+    "ncl": _taiwan("from_ncl"),
+}
 
 
 # bump a number when a provider's lookup changes, so old cached answers (especially "not found") are ignored
-PROVIDER_VERSION = {"google": 4, "eslite": 3, "books_tw": 3, "ncl": 3}   # 2026-10: + genre; NCL search session
+PROVIDER_VERSION = {"google": 4, "eslite": 3, "books_tw": 3, "ncl": 3}  # 2026-10: + genre; NCL search session
 
 
 def _cache_name(name: str) -> str:
@@ -270,8 +302,9 @@ def providers_for(isbn: str, cfg: Config) -> tuple:
     return cfg.providers_tw if is_taiwan(isbn) and cfg.providers_tw else cfg.providers
 
 
-def call_provider(name: str, isbn: str, cfg: Config, providers: dict = None, use_cache: bool = True,
-                  cache: Optional[net.Cache] = None):
+def call_provider(
+    name: str, isbn: str, cfg: Config, providers: dict = None, use_cache: bool = True, cache: Optional[net.Cache] = None
+):
     """One provider, with cache. Returns (result_dict, 'cache'|'live'). Raises on errors."""
     fn: Callable = (providers or PROVIDERS).get(name)
     if fn is None:
@@ -303,9 +336,18 @@ def lookup_book(isbn: str, cfg: Config, providers: dict = None, use_cache: bool 
     tw = is_taiwan(isbn)
     cache = net.Cache(cfg.cache_dir / "lookups.json", cfg.cache_days, cfg.cache_miss_days)
     for name in providers_for(isbn, cfg):
-        if cfg.stop_when and all(result.get(k) for k in cfg.stop_when) and \
-                (not tw or all(has_cjk(result.get(k)) for k in ("title", "author", "publisher", "genre")
-                               if k == "title" or k in cfg.stop_when)):
+        if (
+            cfg.stop_when
+            and all(result.get(k) for k in cfg.stop_when)
+            and (
+                not tw
+                or all(
+                    has_cjk(result.get(k))
+                    for k in ("title", "author", "publisher", "genre")
+                    if k == "title" or k in cfg.stop_when
+                )
+            )
+        ):
             break  # everything we need is filled (for a Taiwanese book: in Chinese) - no more calls / quota
         if net.blocked(name):
             msg = f"{name}: {net.blocked(name)}"
@@ -332,9 +374,13 @@ def lookup_book(isbn: str, cfg: Config, providers: dict = None, use_cache: bool 
         for k in FIELDS:
             if got.get(k) and not result.get(k):
                 result[k] = got[k]
-            elif tw and k in ("title", "author", "publisher", "genre") and has_cjk(got.get(k)) and \
-                    not has_cjk(result.get(k)):
-                result.setdefault(f"{k}_other", result[k])     # keep the English one for the market search
+            elif (
+                tw
+                and k in ("title", "author", "publisher", "genre")
+                and has_cjk(got.get(k))
+                and not has_cjk(result.get(k))
+            ):
+                result.setdefault(f"{k}_other", result[k])  # keep the English one for the market search
                 result[k] = got[k]
     result["source"] = "+".join(used)
     result["_errors"] = errors

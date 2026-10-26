@@ -18,6 +18,7 @@ Your price = market price x PRICE_RATIO (default 0.4), in the market price's own
 currency conversion), rounded to PRICE_ROUND. Books with no market price keep whatever price you give them
 (DEFAULT_CURRENCY, normally TWD, when you don't name a currency).
 """
+
 from __future__ import annotations
 
 import logging
@@ -28,9 +29,9 @@ from typing import Optional
 from urllib.parse import quote
 
 from ..core import net, progress
-from . import taiwan, websearch
 from ..core.config import Config
 from ..core.isbn import normalize
+from . import taiwan, websearch
 
 log = logging.getLogger("pipeline.market")
 MARKET_FIELDS = ("market_price", "market_currency", "market_source", "market_url", "market_match", "market_isbn")
@@ -105,8 +106,11 @@ SHOP_SITES = {"eslite": "eslite.com", "books_tw": "books.com.tw"}
 
 
 # ---- "the same book, another edition" ---------------------------------------------------------------
-_EDITION_BRACKET = re.compile(r"[(\[【〔]([^)\]】〕]*(?:版|edition|ed\.|紀念|典藏|修訂|增訂|新裝|暢銷|平裝|精裝|"
-                              r"首刷|限定|中英|雙語|附)[^)\]】〕]*)[)\]】〕]", re.I)
+_EDITION_BRACKET = re.compile(
+    r"[(\[【〔]([^)\]】〕]*(?:版|edition|ed\.|紀念|典藏|修訂|增訂|新裝|暢銷|平裝|精裝|"
+    r"首刷|限定|中英|雙語|附)[^)\]】〕]*)[)\]】〕]",
+    re.I,
+)
 _EDITION_TAIL = re.compile(r"(?:全新|最新|新|增訂|修訂|增修|紀念|典藏|暢銷|經典|珍藏)?(?:版|新裝版)$")
 _ROLE = re.compile(r"(?:編著|主編|原著|作者|著|編|譯者|譯|繪者|繪|圖|文|撰|口述|監修|審訂)$")
 _SET_WORDS = re.compile(r"套書|合售|套組|全套|冊合|共\d+冊|\d+\s*冊|boxed? ?set|collection", re.I)
@@ -149,10 +153,11 @@ def same_title(ours: str, theirs: str) -> bool:
             i = joined.find(p)
             if i < 0:
                 return False
-            after = joined[i + len(p): i + len(p) + 1]
+            after = joined[i + len(p) : i + len(p) + 1]
             if after.isdigit() and not p[-1:].isdigit():
-                return False                               # 'series' found, but 'series 42' is a specific volume
+                return False  # 'series' found, but 'series 42' is a specific volume
         return len("".join(parts)) >= 3
+
     return inside(a, jb) or inside(b, ja)
 
 
@@ -162,7 +167,7 @@ def author_names(author: str) -> list:
     a = re.sub(r"[(\[]\s*(?:譯者|譯|繪者|translator)[^)\]]*[)\]]", "", a, flags=re.I)
     out = []
     for part in re.split(r"[,;、/&|]|\s{2,}|\band\b", a):
-        part = re.sub(r"[(\[][^)\]]*[)\]]", "", part)            # '(Cole Nussbaumer Knaflic)'
+        part = re.sub(r"[(\[][^)\]]*[)\]]", "", part)  # '(Cole Nussbaumer Knaflic)'
         part = _ROLE.sub("", re.sub(r"[\W_]+", "", part).lower())
         if len(part) >= 2 and part not in out:
             out.append(part)
@@ -171,6 +176,7 @@ def author_names(author: str) -> list:
 
 def _script(names: list) -> set:
     from .lookup import has_cjk
+
     return {"zh" if has_cjk(n) else "latin" for n in names}
 
 
@@ -189,6 +195,7 @@ def same_author(ours: str, theirs: str):
 def same_language(our_isbn: str, their_isbn: str) -> bool:
     """A Taiwanese ISBN's other edition must also be Taiwanese (never the English original), and vice versa."""
     from .lookup import is_taiwan
+
     if not their_isbn:
         return True
     return is_taiwan(our_isbn) == is_taiwan(their_isbn)
@@ -199,15 +206,14 @@ def same_book(our_title: str, our_author: str, their_title: str, their_author: s
     in front allowed) AND the same author. If the authors can't be compared (English vs Chinese name) the title must
     be a long, clear match; without an author on either side the FULL titles must be equal."""
     if _SET_WORDS.search(their_title or "") and not _SET_WORDS.search(our_title or ""):
-        return False                                   # a boxed set is not the book
+        return False  # a boxed set is not the book
     if not same_title(our_title, their_title):
         return False
     who = same_author(our_author, their_author)
     if who is not None:
         return who
-    if not author_names(our_author) or not author_names(their_author):
-        if not (author_names(our_author) or author_names(their_author)):
-            return title_key(our_title, False) == title_key(their_title, False)
+    if not (author_names(our_author) or author_names(their_author)):  # no author on either side
+        return title_key(our_title, False) == title_key(their_title, False)
     return min(len("".join(title_parts(our_title))), len("".join(title_parts(their_title)))) >= 4
 
 
@@ -235,27 +241,44 @@ class Hunt:
 
     def __init__(self, isbn: str, title: str, author: str, cfg: Config):
         self.isbn, self.title, self.author, self.cfg = isbn, title or "", author or "", cfg
-        self.candidates: list = []    # other editions found on the way (best one used, see similar)
-        self.opened: set = set()      # product ids already looked at (never opened twice)
+        self.candidates: list = []  # other editions found on the way (best one used, see similar)
+        self.opened: set = set()  # product ids already looked at (never opened twice)
         self.errors: list = []
 
     # ---- results ---------------------------------------------------------------------------------
     @staticmethod
     def found(price, source, url, match="exact", other_isbn="", year="") -> dict:
-        return {"market_price": price, "market_currency": "TWD", "market_source": source, "market_url": url,
-                "market_match": match, "market_isbn": other_isbn, "_year": year}
+        return {
+            "market_price": price,
+            "market_currency": "TWD",
+            "market_source": source,
+            "market_url": url,
+            "market_match": match,
+            "market_isbn": other_isbn,
+            "_year": year,
+        }
 
     def offer_similar(self, price, shop, url, their_isbn, their_title, year, how, their_author=""):
         if not price or not self.cfg.market_similar or not same_language(self.isbn, their_isbn):
             return
         ed = f"{year} edition" if year else "another edition"
-        log.info("  %s: the same book in %s: %s (ISBN %s) %s TWD - kept in case no exact copy is found", shop, ed,
-                 their_title, their_isbn or "?", price)
-        found = self.found(price, f"{shop} ({how}) - similar: {ed}, ISBN {their_isbn or '?'}", url,
-                           "similar", their_isbn, year)
+        log.info(
+            "  %s: the same book in %s: %s (ISBN %s) %s TWD - kept in case no exact copy is found",
+            shop,
+            ed,
+            their_title,
+            their_isbn or "?",
+            price,
+        )
+        found = self.found(
+            price, f"{shop} ({how}) - similar: {ed}, ISBN {their_isbn or '?'}", url, "similar", their_isbn, year
+        )
         # how sure: authors compared and equal, the full title equal, then the newest edition
-        found["_score"] = (same_author(self.author, their_author) is True,
-                           title_key(self.title, False) == title_key(their_title, False), year or "0")
+        found["_score"] = (
+            same_author(self.author, their_author) is True,
+            title_key(self.title, False) == title_key(their_title, False),
+            year or "0",
+        )
         self.candidates.append(found)
 
     @property
@@ -276,25 +299,45 @@ class Hunt:
     # ---- eslite ----------------------------------------------------------------------------------
     def eslite_search(self, q: str, how: str) -> dict:
         progress.step("market", f"eslite: searching {how} {q}")
-        data = net.request("eslite", "GET", taiwan.ESLITE_SEARCH, params={"q": q, "size": 20, "start": 0},
-                           memo=True, headers=taiwan._headers(self.cfg, "https://www.eslite.com/", "application/json"),
-                           min_interval=self.cfg.scrape_delay) or {}
+        data = (
+            net.request(
+                "eslite",
+                "GET",
+                taiwan.ESLITE_SEARCH,
+                params={"q": q, "size": 20, "start": 0},
+                memo=True,
+                headers=taiwan._headers(self.cfg, "https://www.eslite.com/", "application/json"),
+                min_interval=self.cfg.scrape_delay,
+            )
+            or {}
+        )
         hits = (data.get("hits") or {}).get("hit") or []
-        hits = sorted(hits, key=lambda h: bool((h.get("fields") or {}).get("is_ebook")))   # printed first
+        hits = sorted(hits, key=lambda h: bool((h.get("fields") or {}).get("is_ebook")))  # printed first
         for h in hits:
             f = h.get("fields") or {}
             codes = _isbns_of(f)
             their = self.isbn if self.isbn in codes else next(iter(sorted(codes)), "")
             author = " ".join(taiwan._text(f.get(k)) for k in ("author", "author_orig") if f.get(k))
-            got = self.check("eslite", their, taiwan._text(f.get("name")), author,
-                             _price(f.get("mprice"), f.get("final_price")),
-                             f"https://www.eslite.com/product/{h.get('id')}", taiwan._year(f.get("manufacturer_date")),
-                             how, ebook=not is_printed("", f.get("product_type") or "", f.get("is_ebook")))
+            got = self.check(
+                "eslite",
+                their,
+                taiwan._text(f.get("name")),
+                author,
+                _price(f.get("mprice"), f.get("final_price")),
+                f"https://www.eslite.com/product/{h.get('id')}",
+                taiwan._year(f.get("manufacturer_date")),
+                how,
+                ebook=not is_printed("", f.get("product_type") or "", f.get("is_ebook")),
+            )
             if got:
                 log.info("  eslite q=%s (%s): %s TWD", q, how, got["market_price"])
                 return got
-        log.info("  eslite q=%s (%s): %s result(s), none is a printed copy with this ISBN", q, how,
-                 (data.get("hits") or {}).get("found", len(hits)))
+        log.info(
+            "  eslite q=%s (%s): %s result(s), none is a printed copy with this ISBN",
+            q,
+            how,
+            (data.get("hits") or {}).get("found", len(hits)),
+        )
         return {}
 
     def eslite_product(self, pid: str, how: str, text: str = "") -> dict:
@@ -307,7 +350,7 @@ class Hunt:
         except net.ProviderBlocked:
             prod = {}
         url = f"https://www.eslite.com/product/{pid}"
-        if not prod:   # eslite did not answer: the page text the search engine gave us
+        if not prod:  # eslite did not answer: the page text the search engine gave us
             price = websearch.price_in_text(text, self.isbn)
             return self.found(price, f"eslite ({how})", url) if price else {}
         codes = _isbns_of(prod)
@@ -315,15 +358,27 @@ class Hunt:
         price = _price(prod.get("final_price"), prod.get("retail_price"), prod.get("mprice"))
         oop = " - out of print" if prod.get("product_button_status") == "out_of_print" else ""
         name = taiwan._text(prod.get("name") or prod.get("title"))
-        author = " ".join(taiwan._text(prod.get(k)) for k in ("author", "author_orig", "authors", "author_name")
-                          if prod.get(k))
-        got = self.check("eslite", their, name, author, price, url,
-                         taiwan._year(prod.get("manufacturer_date") or prod.get("publish_date")), how,
-                         ebook=not is_printed("", prod.get("product_type") or "", prod.get("is_ebook")))
+        author = " ".join(
+            taiwan._text(prod.get(k)) for k in ("author", "author_orig", "authors", "author_name") if prod.get(k)
+        )
+        got = self.check(
+            "eslite",
+            their,
+            name,
+            author,
+            price,
+            url,
+            taiwan._year(prod.get("manufacturer_date") or prod.get("publish_date")),
+            how,
+            ebook=not is_printed("", prod.get("product_type") or "", prod.get("is_ebook")),
+        )
         if got and oop:
             got["market_source"] += oop
-        log.info("  eslite product %s: %s", pid, f"ISBN matches, {price} TWD{oop}" if got
-                 else f"ISBN {their or '?'} - not this book")
+        log.info(
+            "  eslite product %s: %s",
+            pid,
+            f"ISBN matches, {price} TWD{oop}" if got else f"ISBN {their or '?'} - not this book",
+        )
         return got
 
     # ---- books.com.tw ----------------------------------------------------------------------------
@@ -333,8 +388,18 @@ class Hunt:
         page = ""
         if not net.blocked("books_tw"):
             try:
-                page = net.request("books_tw", "GET", url, headers=taiwan._headers(self.cfg, referer), memo=True,
-                                   min_interval=self.cfg.scrape_delay, expect="text") or ""
+                page = (
+                    net.request(
+                        "books_tw",
+                        "GET",
+                        url,
+                        headers=taiwan._headers(self.cfg, referer),
+                        memo=True,
+                        min_interval=self.cfg.scrape_delay,
+                        expect="text",
+                    )
+                    or ""
+                )
                 if page and net.looks_blocked(page):
                     _human_check()
             except net.ProviderBlocked:
@@ -348,8 +413,13 @@ class Hunt:
             extracted = websearch.page_text(url, self.cfg)
             info = taiwan.parse_books_product(extracted, "") or {}
             if not info.get("isbn_on_page") and websearch.price_in_text(extracted, self.isbn):
-                info = {"isbn_on_page": self.isbn, "list_price": websearch.price_in_text(extracted, self.isbn),
-                        "title": "", "author": "", "year": ""}
+                info = {
+                    "isbn_on_page": self.isbn,
+                    "list_price": websearch.price_in_text(extracted, self.isbn),
+                    "title": "",
+                    "author": "",
+                    "year": "",
+                }
         if not info.get("isbn_on_page") and page:
             path = net.save_debug(self.cfg.cache_dir, f"books_tw_product_{pid}", page)
             log.info("  books.com.tw product %s: no ISBN found on the page (saved to %s)", pid, path)
@@ -365,18 +435,44 @@ class Hunt:
         if not their:
             return {}
         price = _price(info.get("list_price"), info.get("sale_price"))
-        got = self.check("books_tw", their, info.get("title", ""), info.get("author", ""), price,
-                         taiwan.BOOKS_PRODUCT.format(id=pid), info.get("year", ""), how, ebook=pid.startswith("E"))
-        log.info("  books.com.tw product %s: %s", pid, f"ISBN matches, {price} TWD" if got
-                 else f"ISBN {their} - not this book" if their != self.isbn else "same ISBN, but not a printed book")
+        got = self.check(
+            "books_tw",
+            their,
+            info.get("title", ""),
+            info.get("author", ""),
+            price,
+            taiwan.BOOKS_PRODUCT.format(id=pid),
+            info.get("year", ""),
+            how,
+            ebook=pid.startswith("E"),
+        )
+        log.info(
+            "  books.com.tw product %s: %s",
+            pid,
+            f"ISBN matches, {price} TWD"
+            if got
+            else f"ISBN {their} - not this book"
+            if their != self.isbn
+            else "same ISBN, but not a printed book",
+        )
         return got
 
     def books_search(self, q: str, how: str) -> dict:
         progress.step("market", f"books.com.tw: searching {how} {q}")
         referer = taiwan.BOOKS_SEARCH.format(isbn=quote(q, safe=""))
-        page = net.request("books_tw", "GET", referer, memo=True, min_interval=self.cfg.scrape_delay,
-                           headers=taiwan._headers(self.cfg, "https://www.books.com.tw/"), expect="text") or ""
-        ids = taiwan.parse_books_search(page)              # printed books first, then e-books (E...)
+        page = (
+            net.request(
+                "books_tw",
+                "GET",
+                referer,
+                memo=True,
+                min_interval=self.cfg.scrape_delay,
+                headers=taiwan._headers(self.cfg, "https://www.books.com.tw/"),
+                expect="text",
+            )
+            or ""
+        )
+        ids = taiwan.parse_books_search(page)  # printed books first, then e-books (E...)
         if not ids:
             if page and net.looks_blocked(page):
                 _human_check()
@@ -385,12 +481,16 @@ class Hunt:
             return {}
         printed = [i for i in ids if not i.startswith("E")]
         limit = 2 if how in ("isbn", "isbn10") else self.cfg.market_title_pages
-        for pid in printed[:limit]:                         # e-books (E...) are never used
+        for pid in printed[:limit]:  # e-books (E...) are never used
             got = self.books_product(pid, how, referer)
             if got:
                 return got
-        log.info("  books.com.tw q=%s (%s): %d product(s) checked, none a printed copy with this ISBN", q, how,
-                 min(len(printed), limit))
+        log.info(
+            "  books.com.tw q=%s (%s): %d product(s) checked, none a printed copy with this ISBN",
+            q,
+            how,
+            min(len(printed), limit),
+        )
         return {}
 
     # ---- web search ------------------------------------------------------------------------------
@@ -419,8 +519,9 @@ class Hunt:
         return self.web_results(websearch.search_query(self.isbn, sites, self.cfg, errors=self.errors), "web search")
 
     def web_isbn(self, shop: str) -> dict:
-        return self.web_results(websearch.searches(self.isbn, SHOP_SITES[shop], self.cfg, errors=self.errors),
-                                "web search")
+        return self.web_results(
+            websearch.searches(self.isbn, SHOP_SITES[shop], self.cfg, errors=self.errors), "web search"
+        )
 
     def web_title(self) -> dict:
         t = search_title(self.title)
@@ -429,12 +530,12 @@ class Hunt:
         names = author_names(self.author)
         query = f"{t} {names[0]}" if names else t
         sites = [SHOP_SITES[s] for s in self.cfg.market_providers if s in SHOP_SITES]
-        return self.web_results(websearch.search_query(query, sites, self.cfg, errors=self.errors),
-                                "web search, title")
+        return self.web_results(websearch.search_query(query, sites, self.cfg, errors=self.errors), "web search, title")
 
     # ---- the order -------------------------------------------------------------------------------
     def steps(self):
         from .lookup import isbn10
+
         cfg, kinds = self.cfg, self.cfg.market_search
         shops = [s for s in cfg.market_providers if s in SHOP_SITES]
         web = websearch.enabled(cfg)
@@ -452,8 +553,11 @@ class Hunt:
                 yield "web", self.web_isbn, (shop,)
         if "title" in kinds and search_title(self.title):
             for shop in shops:
-                yield shop, (self.eslite_search if shop == "eslite" else self.books_search), (search_title(self.title),
-                                                                                             "title")
+                yield (
+                    shop,
+                    (self.eslite_search if shop == "eslite" else self.books_search),
+                    (search_title(self.title), "title"),
+                )
         yield "fallback", self.take_similar, ()
         if web and "title" in kinds and cfg.market_similar:
             yield "web", self.web_title, ()
@@ -474,16 +578,19 @@ class Hunt:
             log.info("  ncl: %s", "record found but no price in it" if got else "no record found")
             return {}
         log.info("  ncl: %s TWD", price)
-        return self.found(price, "ncl (registered price)",
-                          got.get("ncl_url") or f"{self.cfg.ncl_base}/H30_SearchBooks.php?Pact=Search&Pval={self.isbn}")
+        return self.found(
+            price,
+            "ncl (registered price)",
+            got.get("ncl_url") or f"{self.cfg.ncl_base}/H30_SearchBooks.php?Pact=Search&Pval={self.isbn}",
+        )
 
     def run(self) -> dict:
         for name, fn, args in self.steps():
             if name in ("eslite", "books_tw", "ncl") and net.blocked(name):
-                continue   # refused us earlier this run (its pages can still be reached through the web search)
+                continue  # refused us earlier this run (its pages can still be reached through the web search)
             try:
                 got = fn(*args)
-            except Exception as exc:   # one source failing must not stop the others
+            except Exception as exc:  # one source failing must not stop the others
                 msg = f"{name}: {net.redact(exc)}"
                 if msg not in self.errors:
                     self.errors.append(msg)
@@ -519,24 +626,49 @@ def price_from_link(url: str, isbn: str, cfg: Config) -> dict:
         if isbn not in _isbns_of(prod):
             raise ValueError(f"That eslite page is ISBN {prod.get('isbn13') or prod.get('ean') or '?'}, not {isbn}.")
         price = _price(prod.get("final_price"), prod.get("retail_price"), prod.get("mprice"))
-        got = {"market_price": price, "market_currency": "TWD", "market_source": "eslite (your link)", "market_match": "exact", "market_isbn": isbn,
-               "market_url": f"https://www.eslite.com/product/{pid}"}
+        got = {
+            "market_price": price,
+            "market_currency": "TWD",
+            "market_source": "eslite (your link)",
+            "market_match": "exact",
+            "market_isbn": isbn,
+            "market_url": f"https://www.eslite.com/product/{pid}",
+        }
     elif m_bk:
         pid = m_bk.group(1)
         page_url = taiwan.BOOKS_PRODUCT.format(id=pid)
-        page = net.request("books_tw", "GET", page_url, headers=taiwan._headers(cfg, "https://www.books.com.tw/"),
-                           min_interval=cfg.scrape_delay, expect="text") or ""
+        page = (
+            net.request(
+                "books_tw",
+                "GET",
+                page_url,
+                headers=taiwan._headers(cfg, "https://www.books.com.tw/"),
+                min_interval=cfg.scrape_delay,
+                expect="text",
+            )
+            or ""
+        )
         info = taiwan.parse_books_product(page, isbn)
         if not info.get("isbn_on_page"):
-            raise ValueError("Could not read that books.com.tw page (it may be blocking automated requests). "
-                             "Type the 定價 into 'Market price, new' instead.")
+            raise ValueError(
+                "Could not read that books.com.tw page (it may be blocking automated requests). "
+                "Type the 定價 into 'Market price, new' instead."
+            )
         if info["isbn_on_page"] != isbn:
             raise ValueError(f"That books.com.tw page is ISBN {info['isbn_on_page']}, not {isbn}.")
         price = _price(info.get("list_price"), info.get("sale_price"))
-        got = {"market_price": price, "market_currency": "TWD", "market_source": "books_tw (your link)", "market_match": "exact", "market_isbn": isbn,
-               "market_url": page_url}
+        got = {
+            "market_price": price,
+            "market_currency": "TWD",
+            "market_source": "books_tw (your link)",
+            "market_match": "exact",
+            "market_isbn": isbn,
+            "market_url": page_url,
+        }
     else:
-        raise ValueError("Paste a link like https://www.eslite.com/product/... or https://www.books.com.tw/products/...")
+        raise ValueError(
+            "Paste a link like https://www.eslite.com/product/... or https://www.books.com.tw/products/..."
+        )
     if not got["market_price"]:
         raise ValueError("Found the page, but no price on it.")
     key = f"market@v{VERSION}" + ("+web" if websearch.enabled(cfg) else "")
@@ -558,6 +690,7 @@ def addon_price(addon: str, isbn: str = ""):
     Anything else (no ISBN, other countries, 50000 / 59999 / 9xxxx = 'no price given') -> None, because we cannot
     know the currency. This is only used when no shop knows the book (MARKET_PROVIDERS)."""
     from .lookup import is_taiwan
+
     a = re.sub(r"\D", "", addon or "")
     if len(a) != 5:
         return None
@@ -565,7 +698,7 @@ def addon_price(addon: str, isbn: str = ""):
         n = int(a)
         return (str(n), "TWD") if 20 <= n <= 20000 else None
     if a[0] not in ADDON_CURRENCY or (isbn and not isbn.startswith(("9780", "9781", "9798"))):
-        return None     # only English-language ISBNs follow the currency-digit convention
+        return None  # only English-language ISBNs follow the currency-digit convention
     cents = int(a) if a[0] in "01" else int(a[1:])
     if cents == 0 or (a[0] == "5" and a[1:] == "9999"):
         return None
@@ -582,14 +715,14 @@ def find_market_price(isbn: str, title: str, cfg: Config, use_cache: bool = True
     if not isbn or not cfg.market_providers:
         return {}
     cache = net.Cache(cfg.cache_dir / "lookups.json", cfg.cache_days, cfg.cache_miss_days)
-    key = f"market@v{VERSION}" + ("+web" if websearch.enabled(cfg) else "")   # adding a key re-checks old misses
+    key = f"market@v{VERSION}" + ("+web" if websearch.enabled(cfg) else "")  # adding a key re-checks old misses
     if use_cache:
         hit = cache.get(key, isbn)
         if hit is not None:
             return hit
     hunt = Hunt(isbn, title, author, cfg)
     trace = _Trace()
-    quiet = log.getEffectiveLevel() > logging.INFO     # nobody shows these lines: collect them, show none
+    quiet = log.getEffectiveLevel() > logging.INFO  # nobody shows these lines: collect them, show none
     old = (log.level, log.propagate)
     if quiet:
         log.setLevel(logging.INFO)
@@ -608,7 +741,7 @@ def find_market_price(isbn: str, title: str, cfg: Config, use_cache: bool = True
         return got
     # nothing found: what was tried, for checking (data/cache/debug/..._market_<isbn>.html)
     net.save_debug(cfg.cache_dir, f"market_{isbn}", "\n".join(trace.lines + [f"ERROR {e}" for e in hunt.errors]))
-    if title and not hunt.errors:         # a real "not found" (every source answered): remembered for a while
+    if title and not hunt.errors:  # a real "not found" (every source answered): remembered for a while
         cache.put(key, isbn, {})
     return {"_errors": hunt.errors} if hunt.errors else {}
 
@@ -688,10 +821,11 @@ def apply_market(row: dict, cfg: Config, use_cache: bool = True, reprice: bool =
             forget_market(row)
         row["market_price"], row["market_currency"] = printed
         row["market_source"], row["market_url"] = "barcode (price printed on the book)", ""
-        row["market_match"], row["market_isbn"] = "exact", ""      # the book itself: no other edition/ISBN involved
+        row["market_match"], row["market_isbn"] = "exact", ""  # the book itself: no other edition/ISBN involved
     if not row.get("market_price"):
-        got = find_market_price(row.get("isbn13", ""), row.get("title", ""), cfg, use_cache,
-                                author=row.get("author", ""))
+        got = find_market_price(
+            row.get("isbn13", ""), row.get("title", ""), cfg, use_cache, author=row.get("author", "")
+        )
         problems += got.pop("_errors", [])
         for k in MARKET_FIELDS:
             if got.get(k):

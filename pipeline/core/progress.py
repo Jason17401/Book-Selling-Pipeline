@@ -16,6 +16,7 @@ phase is "barcodes", "book" (metadata lookup) or "market" (market price).
 Log lines from pipeline.lookup / pipeline.market (e.g. "  eslite q=... : 0 result(s)") become `step` events while a
 display is active, so every search shows up as it happens.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -59,7 +60,7 @@ def result(phase: str, ok: bool, text: str) -> None:
 def listening(*listeners):
     """Send events from THIS thread (the one running the pipeline) to the listeners while the block runs."""
     old = _listeners()
-    _LOCAL.listeners = old + [l for l in listeners if l]
+    _LOCAL.listeners = old + [fn for fn in listeners if fn]
     try:
         yield
     finally:
@@ -104,12 +105,17 @@ def fit(text: str, columns: int) -> str:
 
 def _enable_ansi(stream) -> bool:
     """True if the stream is a terminal that understands 'move the cursor up / clear the line'."""
-    if os.environ.get("PLAIN_PROGRESS", "").strip() not in ("", "0") or not hasattr(stream, "isatty") or not stream.isatty():
+    if (
+        os.environ.get("PLAIN_PROGRESS", "").strip() not in ("", "0")
+        or not hasattr(stream, "isatty")
+        or not stream.isatty()
+    ):
         return False
     if os.name != "nt":
         return os.environ.get("TERM") != "dumb"
     try:  # Windows 10+: switch the console to 'virtual terminal' mode
         import ctypes
+
         k32 = ctypes.windll.kernel32
         handle = k32.GetStdHandle(-11 if stream is sys.stdout else -12)
         mode = ctypes.c_uint32()
@@ -140,8 +146,8 @@ class TerminalDisplay:
         self.fancy = "utf" in enc
         self.ok, self.bad, self.busy = ("✓", "✗", "…") if self.fancy else ("OK", "--", "..")
         self.done = self.total = 0
-        self.current = ""        # the line being rewritten in place
-        self.drawn = 0           # how many live lines are on screen (current + bar)
+        self.current = ""  # the line being rewritten in place
+        self.drawn = 0  # how many live lines are on screen (current + bar)
         self.phase = ""
         self.lock = threading.Lock()
 
@@ -170,8 +176,8 @@ class TerminalDisplay:
     def _draw(self):
         if not self.ansi:
             return
-        lines = [l for l in (self.current, self._bar_line()) if l]
-        self._write("\n".join(fit(l, self._cols()) for l in lines))
+        lines = [line for line in (self.current, self._bar_line()) if line]
+        self._write("\n".join(fit(line, self._cols()) for line in lines))
         self.drawn = len(lines)
 
     def keep(self, line: str):
@@ -196,8 +202,10 @@ class TerminalDisplay:
                 self.keep(("  ! " if d.get("warning") else "") + d.get("text", ""))
             elif kind == "book":
                 self.current = ""
-                self.keep(f"Book {d['n']}/{d['total']}  {d.get('set_id', '')} #{d.get('position', '')}  "
-                          f"ISBN {d.get('isbn') or '(barcode not read)'}")
+                self.keep(
+                    f"Book {d['n']}/{d['total']}  {d.get('set_id', '')} #{d.get('position', '')}  "
+                    f"ISBN {d.get('isbn') or '(barcode not read)'}"
+                )
             elif kind == "step":
                 phase = d.get("phase") or self.phase
                 self.phase = phase
@@ -237,7 +245,7 @@ def terminal(stream=None):
         lg = logging.getLogger(name)
         saved.append((lg, lg.level, lg.propagate))
         lg.setLevel(logging.INFO)
-        lg.propagate = False       # don't ALSO print them through the normal log output
+        lg.propagate = False  # don't ALSO print them through the normal log output
         lg.addHandler(handler)
     try:
         with listening(display):
@@ -262,7 +270,7 @@ class ChatProgress:
     EDIT_EVERY = 3.0
 
     def __init__(self, reply, loop=None, edit_every: float = None):
-        self.reply = reply                       # async fn(text) -> Message: a new message in the chat
+        self.reply = reply  # async fn(text) -> Message: a new message in the chat
         self.loop = loop
         self.queue: asyncio.Queue = asyncio.Queue()
         self.every = self.EDIT_EVERY if edit_every is None else edit_every
@@ -305,10 +313,12 @@ class ChatProgress:
             self.done = d.get("n", self.done + 1)
             if d.get("status") == "needs_manual":
                 why = d.get("reason") or (f"missing {d['errors']}" if d.get("errors") else "see the review window")
-                note = (f"NEEDS MANUAL - set {d.get('set_id', '')}, book {d.get('position', '')}: {why}. "
-                        f"ISBN {d.get('isbn') or 'not read'}"
-                        + (f", {d['title']}" if d.get("title") else "")
-                        + ". Fix it in the review window.")
+                note = (
+                    f"NEEDS MANUAL - set {d.get('set_id', '')}, book {d.get('position', '')}: {why}. "
+                    f"ISBN {d.get('isbn') or 'not read'}"
+                    + (f", {d['title']}" if d.get("title") else "")
+                    + ". Fix it in the review window."
+                )
                 self.manual.append(note)
                 return note
         elif kind == "finish":
@@ -325,8 +335,8 @@ class ChatProgress:
             else:
                 await self.message.edit_text(text)
             self.shown = text
-        except Exception as exc:   # an edit that fails (time-out, 'not modified') is not worth stopping for
-            logging.getLogger('pipeline.bot').debug("progress message not updated: %s", exc)
+        except Exception as exc:  # an edit that fails (time-out, 'not modified') is not worth stopping for
+            logging.getLogger("pipeline.bot").debug("progress message not updated: %s", exc)
 
     async def _send(self, text: str, attempts: int = 3):
         for attempt in range(attempts):
@@ -334,8 +344,8 @@ class ChatProgress:
                 await self.reply(text)
                 return
             except Exception as exc:
-                logging.getLogger('pipeline.bot').warning("could not send '%s...' (%s)", text[:30], exc)
-                await asyncio.sleep(2 ** attempt)
+                logging.getLogger("pipeline.bot").warning("could not send '%s...' (%s)", text[:30], exc)
+                await asyncio.sleep(2**attempt)
 
     async def run(self):
         """Consume events until close(); edit the message at most every `every` seconds, and once at the end."""

@@ -55,7 +55,7 @@ Right now anyone who finds your bot could send it photos. Lock it to your accoun
 1. Send any photo to the bot. It replies `Set 1: FRONT photo saved ...`.
 2. Send `/undo`. It replies `Removed the last photo.`
 
-Your bot is ready. **Continue with [SETUP.md step 4 - Free keys for finding more books](SETUP.md#4-free-keys-for-finding-more-books).**
+Your bot is ready. **Continue with [SETUP.md step 4 - API keys](SETUP.md#4-api-keys).**
 
 ---
 

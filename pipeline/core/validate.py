@@ -14,6 +14,7 @@ Status of a book (column `status` in books.csv):
 Condition and price are REQUIRED (new books get DEFAULT_CONDITION, normally as_new, and a price worked out from the
 market price when one is found). The market price is OPTIONAL: an empty one is fine, a filled-in one must be valid.
 """
+
 from __future__ import annotations
 
 import re
@@ -26,20 +27,44 @@ from .isbn import isbn13_valid
 # know best, with TAAZE's own definitions. The code (English) is what books.csv stores; listings show the Chinese name.
 # (code, Chinese name, English name, TAAZE grade, what it means - English, what it means - TAAZE's Chinese)
 CONDITION_GRADES = [
-    ("new", "全新", "New", "A", "Still in the supplier's original shrink wrap, unopened; no defects.",
-     "原供應商膠膜未拆，無瑕疵。"),
-    ("as_new", "近全新", "As new", "B", "Not shrink-wrapped; signs of reading barely noticeable - like a book on "
-                                         "display in a bookshop.", "未包膜，翻閱痕跡不明顯，如實體賣場陳列販售之書籍。"),
-    ("good", "良好", "Good", "C", "Signs of use, such as folded corners or knocks; not as clean and white as a new "
-                                  "book.", "有使用痕跡，如摺角、碰撞等，不如新書潔白。"),
-    ("fair", "普通", "Fair", "D", "Obvious signs of use, or yellowing / brown or black spots.",
-     "有明顯使用痕跡或黃褐色、黑斑等。"),
+    (
+        "new",
+        "全新",
+        "New",
+        "A",
+        "Still in the supplier's original shrink wrap, unopened; no defects.",
+        "原供應商膠膜未拆，無瑕疵。",
+    ),
+    (
+        "as_new",
+        "近全新",
+        "As new",
+        "B",
+        "Not shrink-wrapped; signs of reading barely noticeable - like a book on display in a bookshop.",
+        "未包膜，翻閱痕跡不明顯，如實體賣場陳列販售之書籍。",
+    ),
+    (
+        "good",
+        "良好",
+        "Good",
+        "C",
+        "Signs of use, such as folded corners or knocks; not as clean and white as a new book.",
+        "有使用痕跡，如摺角、碰撞等，不如新書潔白。",
+    ),
+    (
+        "fair",
+        "普通",
+        "Fair",
+        "D",
+        "Obvious signs of use, or yellowing / brown or black spots.",
+        "有明顯使用痕跡或黃褐色、黑斑等。",
+    ),
     ("poor", "差強人意", "Poor", "E", "Faded or blurred printing, or worse.", "印刷褪色、模糊或其它更糟之書況。"),
 ]
-CONDITIONS = [c[0] for c in CONDITION_GRADES]             # best first
+CONDITIONS = [c[0] for c in CONDITION_GRADES]  # best first
 CONDITION_ZH = {c[0]: c[1] for c in CONDITION_GRADES}
 CONDITION_EN = {c[0]: c[2] for c in CONDITION_GRADES}
-OLD_CONDITIONS = {"acceptable": "fair", "like_new": "as_new"}       # codes used by older versions -> today's
+OLD_CONDITIONS = {"acceptable": "fair", "like_new": "as_new"}  # codes used by older versions -> today's
 DONE = ("listed", "sold")
 STATUSES = ("needs_manual", "enriched", "to_check", "validated", "listed", "sold")
 
@@ -67,15 +92,23 @@ def row_issues(r: dict, cfg: Config) -> list:
         out.append({"field": "condition", "msg": f"Condition '{cond}' is not one of: {', '.join(CONDITIONS)}"})
     price = (r.get("price") or "").strip()
     if not price:
-        why = ("no market price was found to work it out from" if not (r.get("market_price") or "").strip()
-               else "press '= 40% of market' or type it")
+        why = (
+            "no market price was found to work it out from"
+            if not (r.get("market_price") or "").strip()
+            else "press '= 40% of market' or type it"
+        )
         out.append({"field": "price", "msg": f"Price missing: {why} - type your price and its currency"})
     else:
         try:
             p = float(price)
             if not (cfg.min_price <= p <= cfg.max_price):
-                out.append({"field": "price", "msg": f"Price {p:g} is outside {cfg.min_price:g}-{cfg.max_price:g} "
-                                                     "(MIN_PRICE / MAX_PRICE in .env)"})
+                out.append(
+                    {
+                        "field": "price",
+                        "msg": f"Price {p:g} is outside {cfg.min_price:g}-{cfg.max_price:g} "
+                        "(MIN_PRICE / MAX_PRICE in .env)",
+                    }
+                )
         except ValueError:
             out.append({"field": "price", "msg": "Price must be a number, e.g. 5 or 12.50"})
         if not re.fullmatch(r"[A-Z]{3}", (r.get("currency") or "").strip()):

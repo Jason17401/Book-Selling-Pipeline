@@ -4,6 +4,7 @@ we are rate-limited or blocked, a local cache, and a daily counter for quota-lim
 
 Nothing here ever puts an API key in a URL or an error message.
 """
+
 from __future__ import annotations
 
 import json
@@ -17,8 +18,9 @@ from urllib.parse import urlparse
 
 import requests
 
-BROWSER_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
-              "Chrome/128.0.0.0 Safari/537.36")
+BROWSER_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+)
 
 
 class ProviderBlocked(RuntimeError):
@@ -31,8 +33,8 @@ class QuotaReached(RuntimeError):
 
 _SESSION: Optional[requests.Session] = None
 _LOCK = threading.Lock()
-_LAST_CALL: dict = {}      # host -> time.monotonic() of the last request
-_BLOCKED: dict = {}        # provider -> reason (cleared when the program restarts)
+_LAST_CALL: dict = {}  # host -> time.monotonic() of the last request
+_BLOCKED: dict = {}  # provider -> reason (cleared when the program restarts)
 _SECRET_RE = re.compile(r"(key|token|apikey|api_key|authorization)=([^&\s]+)", re.I)
 
 
@@ -78,19 +80,30 @@ def _retry_after(r: requests.Response, default: float) -> float:
         return default
 
 
-_MEMO: dict = {}   # answers to identical GETs during this run (metadata + market price often need the same page)
+_MEMO: dict = {}  # answers to identical GETs during this run (metadata + market price often need the same page)
 
 
-def request(provider: str, method: str, url: str, *, min_interval: float = 1.0, retries: int = 2,
-            timeout: float = 20, expect: str = "json", memo: bool = False, **kw):
+def request(
+    provider: str,
+    method: str,
+    url: str,
+    *,
+    min_interval: float = 1.0,
+    retries: int = 2,
+    timeout: float = 20,
+    expect: str = "json",
+    memo: bool = False,
+    **kw,
+):
     """memo=True: an identical GET made earlier in this run is answered from memory (no second request)."""
     key = None
     if memo and method == "GET":
         key = (url, expect, repr(sorted((kw.get("params") or {}).items())))
         if key in _MEMO:
             return _MEMO[key]
-    result = _request(provider, method, url, min_interval=min_interval, retries=retries, timeout=timeout,
-                      expect=expect, **kw)
+    result = _request(
+        provider, method, url, min_interval=min_interval, retries=retries, timeout=timeout, expect=expect, **kw
+    )
     if key is not None:
         if len(_MEMO) > 300:
             _MEMO.clear()
@@ -98,8 +111,17 @@ def request(provider: str, method: str, url: str, *, min_interval: float = 1.0, 
     return result
 
 
-def _request(provider: str, method: str, url: str, *, min_interval: float = 1.0, retries: int = 2,
-             timeout: float = 20, expect: str = "json", **kw):
+def _request(
+    provider: str,
+    method: str,
+    url: str,
+    *,
+    min_interval: float = 1.0,
+    retries: int = 2,
+    timeout: float = 20,
+    expect: str = "json",
+    **kw,
+):
     """Returns parsed JSON (expect='json'), text (expect='text'), or None on 404.
 
     429 / 503: wait (Retry-After if given, else 2s, 4s) and retry; still failing -> ProviderBlocked.
@@ -143,10 +165,13 @@ def _request(provider: str, method: str, url: str, *, min_interval: float = 1.0,
             try:
                 return r.json()
             except ValueError:
-                raise RuntimeError(f"{host} did not return JSON (blocked by a captcha page?)")
-        r.encoding = r.encoding if r.encoding and r.encoding.lower() != "iso-8859-1" else (r.apparent_encoding or "utf-8")
+                raise RuntimeError(f"{host} did not return JSON (blocked by a captcha page?)") from None
+        r.encoding = (
+            r.encoding if r.encoding and r.encoding.lower() != "iso-8859-1" else (r.apparent_encoding or "utf-8")
+        )
         return r.text
-    why = f"{host} could not be reached ({type(last_exc).__name__ if last_exc else 'error'}) - not asking it again this run"
+    what = type(last_exc).__name__ if last_exc else "error"
+    why = f"{host} could not be reached ({what}) - not asking it again this run"
     block(provider, why)
     raise ProviderBlocked(why)
 
@@ -190,6 +215,7 @@ def pacific_today() -> str:
     """Google's daily quotas reset at midnight US Pacific time."""
     try:
         from zoneinfo import ZoneInfo
+
         return datetime.now(ZoneInfo("America/Los_Angeles")).strftime("%Y-%m-%d")
     except Exception:  # Windows without the tzdata package: approximate with UTC-8
         return (datetime.now(timezone.utc) - timedelta(hours=8)).strftime("%Y-%m-%d")
@@ -215,18 +241,21 @@ class DailyCounter:
         d = self._read().get(name, {})
         return d.get("used", 0) if d.get("day") == self._now() else 0
 
-    def take(self, name: str, limit: int, setting: str = "GOOGLE_DAILY_LIMIT") -> int:
-        """Count one call. Raises QuotaReached if the limit is used up. Returns calls used in this period."""
+    def take(self, name: str, limit: int, setting: str = "GOOGLE_DAILY_LIMIT", cost: int = 1) -> int:
+        """Count one call (`cost` units - a thorough Tavily search costs 2 credits). Raises QuotaReached if it would go
+        over the limit. Returns the units used in this period."""
         data = self._read()
         d = data.get(name, {})
         if d.get("day") != self._now():
             d = {"day": self._now(), "used": 0}
-        if limit and d["used"] >= limit:
+        if limit and d["used"] + cost > limit:
             when = "today, resets at midnight US Pacific time" if self.period == "day" else "this month"
             kind = "daily" if self.period == "day" else "monthly"
-            raise QuotaReached(f"{kind} limit reached ({d['used']}/{limit} calls {when}). Change {setting} in .env "
-                               "if you really need more.")
-        d["used"] += 1
+            raise QuotaReached(
+                f"{kind} limit reached ({d['used']}/{limit} used {when}). Change {setting} in .env "
+                "if you really need more."
+            )
+        d["used"] += cost
         data[name] = d
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.path.write_text(json.dumps(data), encoding="utf-8")
@@ -246,8 +275,17 @@ def save_debug(cache_dir: Path, name: str, text: str, keep: int = 30) -> Path:
     return path
 
 
-BLOCK_HINTS = ("captcha", "recaptcha", "cf-chl", "just a moment", "access denied", "robot check", "請進行驗證",
-               "驗證碼", "unusual traffic")
+BLOCK_HINTS = (
+    "captcha",
+    "recaptcha",
+    "cf-chl",
+    "just a moment",
+    "access denied",
+    "robot check",
+    "請進行驗證",
+    "驗證碼",
+    "unusual traffic",
+)
 
 
 def looks_blocked(page: str) -> bool:

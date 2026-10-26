@@ -1,24 +1,28 @@
 """Barcode reading on synthetic photos, and .env parsing."""
+
 import os
 
 import pytest
+from synth import TW_ISBNS, book_back, ean13_bits, with_check
 
-from pipeline.photos import decode
 from pipeline.core.config import Config
 from pipeline.core.isbn import normalize
-from synth import TW_ISBNS, book_back, ean13_bits, with_check
+from pipeline.photos import decode
 
 
 def test_synthetic_barcode_is_valid_ean():
     assert normalize(TW_ISBNS[0]) == TW_ISBNS[0] and len(ean13_bits(TW_ISBNS[0])) == 95
 
 
-@pytest.mark.parametrize("kw", [
-    dict(module=3.0),                                  # plain
-    dict(module=2.5, jpeg=70, noise=20),               # phone-quality JPEG
-    dict(module=2.0, size=(700, 1000)),                # Telegram-compressed 'Photo' size
-    dict(module=3.0, angle=12),                        # tilted
-])
+@pytest.mark.parametrize(
+    "kw",
+    [
+        dict(module=3.0),  # plain
+        dict(module=2.5, jpeg=70, noise=20),  # phone-quality JPEG
+        dict(module=2.0, size=(700, 1000)),  # Telegram-compressed 'Photo' size
+        dict(module=3.0, angle=12),  # tilted
+    ],
+)
 def test_reads_isbn_not_the_taiwan_price_barcode(kw):
     isbn = TW_ISBNS[3]
     img = book_back(isbn, price_code=with_check("471000012345"), **kw)
@@ -27,16 +31,27 @@ def test_reads_isbn_not_the_taiwan_price_barcode(kw):
 
 def test_blank_photo_reads_nothing():
     from PIL import Image
+
     assert decode.decode_isbn_image(Image.new("RGB", (800, 600), "white"), effort="fast") is None
 
 
 def test_env_parsing(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     for k in list(os.environ):
-        if k in ("ROTATE", "BACK_ROTATE", "BOOK_PROVIDERS", "BOOK_PROVIDERS_TW", "LAYOUT", "SET_SPLIT", "DEFAULT_CURRENCY"):
+        if k in (
+            "ROTATE",
+            "BACK_ROTATE",
+            "BOOK_PROVIDERS",
+            "BOOK_PROVIDERS_TW",
+            "LAYOUT",
+            "SET_SPLIT",
+            "DEFAULT_CURRENCY",
+        ):
             monkeypatch.delenv(k)
-    (tmp_path / ".env").write_text("ROTATE=90      # comment\nDEFAULT_CURRENCY=nzd       \n"
-                                   "BOOK_PROVIDERS_TW=eslite, books_tw,ncl\n", encoding="utf-8")
+    (tmp_path / ".env").write_text(
+        "ROTATE=90      # comment\nDEFAULT_CURRENCY=nzd       \nBOOK_PROVIDERS_TW=eslite, books_tw,ncl\n",
+        encoding="utf-8",
+    )
     cfg = Config.from_env()
     assert cfg.rotate == 90 and cfg.default_currency == "NZD"
     assert Config().default_currency == "TWD"
@@ -52,8 +67,10 @@ def test_env_rejects_typo_provider(tmp_path, monkeypatch):
 
 def test_price_add_on_is_read_with_the_isbn(tmp_path):
     import pytest
-    from pipeline.photos import decode as dec
     from synth import TW_ISBNS, book_back
+
+    from pipeline.photos import decode as dec
+
     if dec.zxingcpp is None and getattr(getattr(dec.pyzbar, "ZBarSymbol", None), "EAN5", None) is None:
         pytest.skip("needs zxing-cpp (or zbar with EAN-5) to read add-ons")
     dec.ADDONS.clear()
@@ -64,20 +81,22 @@ def test_price_add_on_is_read_with_the_isbn(tmp_path):
 
 def test_add_on_search_area_is_right_of_the_isbn_barcode():
     from PIL import Image
+
     from pipeline.photos.decode import Detection, addon_crops, read_addon
+
     img = Image.new("RGB", (1000, 800), "white")
     crops = addon_crops(img, Detection("9789861371955", cx=300, cy=400, width=200))
-    assert len(crops) == 1 and crops[0].width >= 1800 * 0.99           # enlarged
-    assert addon_crops(img, Detection("9789861371955")) == []         # no position known: whole photo only
-    assert read_addon(img, "9789861371955") == ""                      # nothing there: no crash, no guess
+    assert len(crops) == 1 and crops[0].width >= 1800 * 0.99  # enlarged
+    assert addon_crops(img, Detection("9789861371955")) == []  # no position known: whole photo only
+    assert read_addon(img, "9789861371955") == ""  # nothing there: no crash, no guess
 
 
 def test_defaults_and_settings_no_longer_used(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     for k in ("GRID", "SET_SIZE"):
         monkeypatch.delenv(k, raising=False)
-    monkeypatch.setenv("BOOK_PROVIDERS", "openlibrary,google,isbndb")     # an older .env: isbndb is gone, no error
-    monkeypatch.setenv("S3_BUCKET", "books")                              # ignored: photos go to ImgBB only
+    monkeypatch.setenv("BOOK_PROVIDERS", "openlibrary,google,isbndb")  # an older .env: isbndb is gone, no error
+    monkeypatch.setenv("S3_BUCKET", "books")  # ignored: photos go to ImgBB only
     cfg = Config.from_env()
     assert cfg.providers == ("openlibrary", "google") and cfg.grid == (2, 4) and cfg.set_size == 8
     assert cfg.photo_service == "" and not hasattr(cfg, "s3_bucket") and not hasattr(cfg, "isbndb_key")

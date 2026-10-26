@@ -13,6 +13,7 @@ How (OpenCV, no AI model needed):
 Book N is still the N-th book counting along the top row left to right, then the next row - the order you send the
 back photos in. If a cell shows nothing book-like, the plain grid cell is used for it (found=False).
 """
+
 from __future__ import annotations
 
 import json
@@ -35,9 +36,9 @@ FULL = (0.0, 0.0, 1.0, 1.0)
 
 @dataclass
 class Segment:
-    box: Tuple[int, int, int, int]    # the book itself (left, top, right, bottom), full-resolution pixels
-    angle: float = 0.0                # degrees to turn the cut-out so the book stands straight
-    found: bool = True                # False = nothing book-like seen: the plain grid cell is used
+    box: Tuple[int, int, int, int]  # the book itself (left, top, right, bottom), full-resolution pixels
+    angle: float = 0.0  # degrees to turn the cut-out so the book stands straight
+    found: bool = True  # False = nothing book-like seen: the plain grid cell is used
 
 
 def available() -> bool:
@@ -71,8 +72,9 @@ def _local_std(gray: "np.ndarray", k: int) -> "np.ndarray":
     return np.sqrt(np.maximum(0.0, cv2.blur(g * g, (k, k)) - m * m))
 
 
-def _shadow(lab: "np.ndarray", model: "np.ndarray", texture: "np.ndarray" = None,
-            table: "np.ndarray" = None) -> "np.ndarray":
+def _shadow(
+    lab: "np.ndarray", model: "np.ndarray", texture: "np.ndarray" = None, table: "np.ndarray" = None
+) -> "np.ndarray":
     """1 where the picture is the table in a book's shadow: darker than the table would be there, but the same colour
     (a shadow dims the table without changing its hue much), and - on a table with a texture (carpet, wood grain) -
     with that texture still showing through, only dimmer. Not counted as book, so the shadow a book casts to one side
@@ -86,7 +88,7 @@ def _shadow(lab: "np.ndarray", model: "np.ndarray", texture: "np.ndarray" = None
     out = (dl > 0) & (dab <= np.maximum(8.0, 0.2 * dl)) & (k >= 0.3)
     if texture is not None and table is not None and table.any():
         grain = float(np.median(texture[table]))
-        if grain >= 2.0:                     # the table has a visible texture: it must show through the shadow
+        if grain >= 2.0:  # the table has a visible texture: it must show through the shadow
             out &= texture >= 0.35 * k * grain
     return out
 
@@ -144,12 +146,12 @@ def _best_split(fill: "np.ndarray", edge: "np.ndarray", expected: float, lo: int
     lo, hi = max(1, lo), min(len(fill) - 2, hi)
     if hi <= lo:
         return int(round(expected))
-    f = fill[lo:hi + 1]
-    e = edge[lo:hi + 1]
+    f = fill[lo : hi + 1]
+    e = edge[lo : hi + 1]
     fn = (f - f.min()) / (np.ptp(f) or 1.0)
     en = (e - e.min()) / (np.ptp(e) or 1.0)
     gap_score = 1.0 - fn
-    has_gap = f.min() < 0.35 * max(1e-6, np.median(fill))          # a real strip of table exists here
+    has_gap = f.min() < 0.35 * max(1e-6, np.median(fill))  # a real strip of table exists here
     score = gap_score * (1.5 if has_gap else 0.6) + en * (0.3 if has_gap else 0.9)
     pos = np.arange(lo, hi + 1)
     score -= (0.35 if has_gap else 0.7) * np.abs(pos - expected) / max(1.0, (hi - lo) / 2)
@@ -209,6 +211,7 @@ def _trim(mask, box, most: float = 0.15):
         while n - hi < k and fill[hi - 1] < lim:
             hi -= 1
         return lo, hi
+
     cl, ch = cut(_smooth(m.mean(axis=0), 3))
     rl, rh = cut(_smooth(m.mean(axis=1), 3))
     return (x0 + cl, y0 + rl, x0 + ch, y0 + rh)
@@ -231,7 +234,8 @@ def _snap(box, cell, gx, gy):
         idx = np.where(seg >= strong)[0]
         if not len(idx):
             return None
-        return lo + int(idx[np.argmin(np.abs(idx + lo - ref))])     # the strong line nearest the current side
+        return lo + int(idx[np.argmin(np.abs(idx + lo - ref))])  # the strong line nearest the current side
+
     inward_x, inward_y = int(0.06 * w), int(0.06 * h)
     rows = slice(y0 + h // 6, y1 - h // 6)
     cols = slice(x0 + w // 6, x1 - w // 6)
@@ -276,8 +280,14 @@ def _tilt(edges, bw: int, bh: int) -> float:
     Positive = turned clockwise on screen; PIL's rotate(angle) with this value straightens it. 0 if level or unsure."""
     if edges is None or bw < 10 or bh < 10:
         return 0.0
-    lines = cv2.HoughLinesP(edges, 1, np.pi / 360, threshold=max(20, int(0.25 * min(bw, bh))),
-                            minLineLength=int(0.45 * min(bw, bh)), maxLineGap=max(3, int(0.03 * min(bw, bh))))
+    lines = cv2.HoughLinesP(
+        edges,
+        1,
+        np.pi / 360,
+        threshold=max(20, int(0.25 * min(bw, bh))),
+        minLineLength=int(0.45 * min(bw, bh)),
+        maxLineGap=max(3, int(0.03 * min(bw, bh))),
+    )
     if lines is None:
         return 0.0
     devs, weights = [], []
@@ -291,12 +301,13 @@ def _tilt(edges, bw: int, bh: int) -> float:
         return 0.0
     order = np.argsort(devs)
     cum = np.cumsum(np.asarray(weights)[order])
-    med = float(np.asarray(devs)[order][np.searchsorted(cum, cum[-1] / 2)])   # length-weighted median
+    med = float(np.asarray(devs)[order][np.searchsorted(cum, cum[-1] / 2)])  # length-weighted median
     return med if 1.5 <= abs(med) <= 20 else 0.0
 
 
-def segment_books(img: Image.Image, rows: int, cols: int, region: Sequence[float] = FULL,
-                  analysis: int = 1000) -> List[Segment]:
+def segment_books(
+    img: Image.Image, rows: int, cols: int, region: Sequence[float] = FULL, analysis: int = 1000
+) -> List[Segment]:
     """One Segment per grid position (rows*cols of them), in book order. Without OpenCV: the plain grid cells."""
     W, H = img.size
     rx0, ry0, rx1, ry1 = (region[0] * W, region[1] * H, region[2] * W, region[3] * H)
@@ -312,16 +323,16 @@ def segment_books(img: Image.Image, rows: int, cols: int, region: Sequence[float
     gx = np.abs(cv2.Sobel(gray, cv2.CV_32F, 1, 0, ksize=3))
     med = float(np.median(g8))
     canny = cv2.Canny(g8, int(max(10, 0.5 * med)), int(min(255, med + 30))) > 0
-    hlines = (canny & (gy > gx)).astype(np.float32)       # edge pixels of horizontal lines (top/bottom of books)
-    vlines = (canny & (gx >= gy)).astype(np.float32)      # ... of vertical lines (left/right of books)
+    hlines = (canny & (gy > gx)).astype(np.float32)  # edge pixels of horizontal lines (top/bottom of books)
+    vlines = (canny & (gx >= gy)).astype(np.float32)  # ... of vertical lines (left/right of books)
     sx0, sy0, sx1, sy1 = int(rx0 * s), int(ry0 * s), int(rx1 * s), int(ry1 * s)
     # where the books are: the grid is spread over the books, not over the whole photo (empty table around them)
-    rsx0, rsy0, rsx1, rsy1 = sx0, sy0, sx1, sy1             # the region: outer limit for a book's box
+    rsx0, rsy0, rsx1, rsy1 = sx0, sy0, sx1, sy1  # the region: outer limit for a book's box
     sy0, sy1 = _extent(mask[sy0:sy1, sx0:sx1].mean(axis=1), sy0, sy1)
     sx0, sx1 = _extent(mask[sy0:sy1, sx0:sx1].mean(axis=0), sx0, sx1)
     sub = mask[sy0:sy1, sx0:sx1].astype(np.float32)
     row_cuts = [sy0 + c for c in _splits(sub, hlines[sy0:sy1, sx0:sx1], 0, sy1 - sy0, rows, axis=0)]
-    found_boxes = []          # (index, box in analysis pixels, cell, angle, found)
+    found_boxes = []  # (index, box in analysis pixels, cell, angle, found)
     for r in range(rows):
         ya, yb = row_cuts[r], row_cuts[r + 1]
         band = mask[ya:yb, sx0:sx1].astype(np.float32)
@@ -329,8 +340,12 @@ def segment_books(img: Image.Image, rows: int, cols: int, region: Sequence[float
         for c in range(cols):
             xa, xb = col_cuts[c], col_cuts[c + 1]
             # the outermost books may reach past where the "book" pixels seemed to end: search up to the region's edge
-            lim = (rsx0 if c == 0 else xa, rsy0 if r == 0 else ya, rsx1 if c == cols - 1 else xb,
-                   rsy1 if r == rows - 1 else yb)
+            lim = (
+                rsx0 if c == 0 else xa,
+                rsy0 if r == 0 else ya,
+                rsx1 if c == cols - 1 else xb,
+                rsy1 if r == rows - 1 else yb,
+            )
             (bx0, by0, bx1, by1), angle, found = _book_in_cell(mask, xa, ya, xb, yb, canny.astype(np.uint8) * 255)
             if found and not angle:
                 bx0, by0, bx1, by1 = _snap(_trim(mask, (bx0, by0, bx1, by1)), lim, gx, gy)
@@ -366,8 +381,9 @@ def _match_sizes(items, gx, gy) -> None:
             strong = max(15.0, 2.2 * float(np.median(seg)))
             idx = np.where(seg >= strong)[0]
             return None if not len(idx) else lo + int(idx[np.argmin(np.abs(idx + lo - target))])
+
         if h < 0.93 * mh:
-            hy = gy[:, x0 + w // 6: max(x0 + w // 6 + 1, x1 - w // 6)].mean(axis=1)
+            hy = gy[:, x0 + w // 6 : max(x0 + w // 6 + 1, x1 - w // 6)].mean(axis=1)
             down = line_near(hy, y0 + mh, y1, min(cy1, y0 + 1.15 * mh))
             up = line_near(hy, y1 - mh, max(cy0, y1 - 1.15 * mh), y0)
             cands = [(abs((d + 1 - y0) - mh), (y0, d + 1)) for d in [down] if d is not None]
@@ -375,7 +391,7 @@ def _match_sizes(items, gx, gy) -> None:
             if cands:
                 y0, y1 = min(cands)[1]
         if w < 0.93 * mw:
-            vx = gx[y0 + h // 6: max(y0 + h // 6 + 1, y1 - h // 6)].mean(axis=0)
+            vx = gx[y0 + h // 6 : max(y0 + h // 6 + 1, y1 - h // 6)].mean(axis=0)
             right = line_near(vx, x0 + mw, x1, min(cx1, x0 + 1.15 * mw))
             left = line_near(vx, x1 - mw, max(cx0, x1 - 1.15 * mw), x0)
             cands = [(abs((r + 1 - x0) - mw), (x0, r + 1)) for r in [right] if r is not None]
@@ -388,8 +404,11 @@ def _match_sizes(items, gx, gy) -> None:
 def _grid_segments(W, H, rows, cols, region) -> List[Segment]:
     x0, y0, x1, y1 = region[0] * W, region[1] * H, region[2] * W, region[3] * H
     cw, ch = (x1 - x0) / cols, (y1 - y0) / rows
-    return [Segment((int(x0 + c * cw), int(y0 + r * ch), int(x0 + (c + 1) * cw), int(y0 + (r + 1) * ch)), 0.0, False)
-            for r in range(rows) for c in range(cols)]
+    return [
+        Segment((int(x0 + c * cw), int(y0 + r * ch), int(x0 + (c + 1) * cw), int(y0 + (r + 1) * ch)), 0.0, False)
+        for r in range(rows)
+        for c in range(cols)
+    ]
 
 
 # ---- cutting -------------------------------------------------------------------------------------
@@ -409,13 +428,13 @@ def cut_book(img: Image.Image, seg: Segment, margin: float = 0.04, others: Seque
             ox0, oy0, ox1, oy1 = o.box
             side_by_side = min(y1, oy1) - max(y0, oy0) > 0.3 * h
             stacked = min(x1, ox1) - max(x0, ox0) > 0.3 * w
-            if side_by_side and ox0 >= x1 - 0.1 * w:          # a neighbour to the right
+            if side_by_side and ox0 >= x1 - 0.1 * w:  # a neighbour to the right
                 right = min(right, max(x1, (x1 + ox0) // 2))
-            if side_by_side and ox1 <= x0 + 0.1 * w:          # ... to the left
+            if side_by_side and ox1 <= x0 + 0.1 * w:  # ... to the left
                 left = max(left, min(x0, (x0 + ox1 + 1) // 2))
-            if stacked and oy0 >= y1 - 0.1 * h:               # below
+            if stacked and oy0 >= y1 - 0.1 * h:  # below
                 bottom = min(bottom, max(y1, (y1 + oy0) // 2))
-            if stacked and oy1 <= y0 + 0.1 * h:               # above
+            if stacked and oy1 <= y0 + 0.1 * h:  # above
                 top = max(top, min(y0, (y0 + oy1 + 1) // 2))
         # keep the cover centred: the same room on opposite sides (the smaller of the two)
         rx, ry = min(x0 - left, right - x1), min(y0 - top, bottom - y1)
@@ -442,6 +461,7 @@ def cut_book(img: Image.Image, seg: Segment, margin: float = 0.04, others: Seque
 def draw_segments(img: Image.Image, segs: List[Segment]) -> Image.Image:
     """A preview: every book's box drawn and numbered (green = found, orange = fell back to the grid cell)."""
     from .grid import font
+
     out = img.convert("RGB").copy()
     d = ImageDraw.Draw(out)
     lw = max(2, int(max(out.size) / 400))
@@ -449,14 +469,19 @@ def draw_segments(img: Image.Image, segs: List[Segment]) -> Image.Image:
     for n, sg in enumerate(segs, 1):
         colour = (0, 170, 60) if sg.found else (240, 140, 0)
         d.rectangle(sg.box, outline=colour, width=lw)
-        d.text((sg.box[0] + 3 * lw, sg.box[1] + 2 * lw), f"{n}" + (f"  {sg.angle:+.0f}°" if sg.angle else ""),
-               font=f, fill=colour)
+        d.text(
+            (sg.box[0] + 3 * lw, sg.box[1] + 2 * lw),
+            f"{n}" + (f"  {sg.angle:+.0f}°" if sg.angle else ""),
+            font=f,
+            fill=colour,
+        )
     return out
 
 
 def save_segments(path: Path, img_size, segs: List[Segment]) -> None:
-    Path(path).write_text(json.dumps({"image_size": list(img_size), "books": [asdict(s) for s in segs]}),
-                          encoding="utf-8")
+    Path(path).write_text(
+        json.dumps({"image_size": list(img_size), "books": [asdict(s) for s in segs]}), encoding="utf-8"
+    )
 
 
 def load_segments(path: Path, img_size=None) -> Optional[List[Segment]]:
@@ -477,5 +502,5 @@ def find_books(img: Image.Image, grid, region=FULL, method: str = "auto") -> Lis
         return _grid_segments(img.width, img.height, rows, cols, region)
     try:
         return segment_books(img, rows, cols, region)
-    except Exception:                       # never let an odd photo stop processing
+    except Exception:  # never let an odd photo stop processing
         return _grid_segments(img.width, img.height, rows, cols, region)

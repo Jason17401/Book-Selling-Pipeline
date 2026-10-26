@@ -1,6 +1,7 @@
 """The front photo of a set is a GRID of books (GRID=rows x cols, e.g. 2x4). Book N is the N-th cell counting along the
 top row left to right, then the next row. This module does the geometry, draws numbers on the photo, and makes the
 review sheet. Nothing here is stored in books.csv: crops are made on the fly from the front photo when needed."""
+
 from __future__ import annotations
 
 import math
@@ -13,11 +14,23 @@ from .decode import load_image, rotate_cw
 
 RED = (200, 0, 0)
 FULL = (0.0, 0.0, 1.0, 1.0)
-CJK_FONTS = ("msjh.ttc", "msjhbd.ttc", "mingliu.ttc", "msyh.ttc", "simsun.ttc",          # Windows
-             "PingFang.ttc", "Hiragino Sans GB.ttc", "STHeiti Medium.ttc",              # macOS
-             "NotoSansCJK-Regular.ttc", "NotoSansCJKtc-Regular.otf", "wqy-microhei.ttc", "DroidSansFallbackFull.ttf",
-             "C:/Windows/Fonts/msjh.ttc", "/System/Library/Fonts/PingFang.ttc",
-             "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc")
+CJK_FONTS = (
+    "msjh.ttc",
+    "msjhbd.ttc",
+    "mingliu.ttc",
+    "msyh.ttc",
+    "simsun.ttc",  # Windows
+    "PingFang.ttc",
+    "Hiragino Sans GB.ttc",
+    "STHeiti Medium.ttc",  # macOS
+    "NotoSansCJK-Regular.ttc",
+    "NotoSansCJKtc-Regular.otf",
+    "wqy-microhei.ttc",
+    "DroidSansFallbackFull.ttf",
+    "C:/Windows/Fonts/msjh.ttc",
+    "/System/Library/Fonts/PingFang.ttc",
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+)
 
 
 def font(size: int, cjk: bool = False):
@@ -52,8 +65,12 @@ def cell_box(r: int, c: int, rows: int, cols: int, size, pad: float = 0.0, regio
     W, H = size
     x0, y0, x1, y1 = region[0] * W, region[1] * H, region[2] * W, region[3] * H
     cw, ch = (x1 - x0) / cols, (y1 - y0) / rows
-    return (max(0, int(x0 + (c - pad) * cw)), max(0, int(y0 + (r - pad) * ch)),
-            min(W, int(x0 + (c + 1 + pad) * cw)), min(H, int(y0 + (r + 1 + pad) * ch)))
+    return (
+        max(0, int(x0 + (c - pad) * cw)),
+        max(0, int(y0 + (r - pad) * ch)),
+        min(W, int(x0 + (c + 1 + pad) * cw)),
+        min(H, int(y0 + (r + 1 + pad) * ch)),
+    )
 
 
 def crop_book(front: Image.Image, pos: int, grid, region=FULL) -> Optional[Image.Image]:
@@ -88,9 +105,11 @@ def orientation_warning(img: Image.Image, rows: int, cols: int, label: str, regi
     if 0.4 <= a <= 2.5:
         return None
     r, c = suggest_grid(img.size, rows * cols, region)
-    return (f"{label} photo does not fit a {rows}x{cols} grid (rows x columns): each cell would be {a:.2f} times as wide "
-            "as tall, but books are about 0.7 or 1.4. Either the photo is sideways - run: python -m pipeline orient "
-            f"<photo> and set ROTATE in .env - or your books are laid out the other way round: try GRID={r}x{c}")
+    return (
+        f"{label} photo does not fit a {rows}x{cols} grid (rows x columns): each cell would be {a:.2f} times as wide "
+        "as tall, but books are about 0.7 or 1.4. Either the photo is sideways - run: python -m pipeline orient "
+        f"<photo> and set ROTATE in .env - or your books are laid out the other way round: try GRID={r}x{c}"
+    )
 
 
 # ---- drawing -------------------------------------------------------------------------------------
@@ -109,23 +128,19 @@ def numbered(img: Image.Image, rows: int, cols: int, region=FULL, boxes=None) ->
     out = img.copy()
     d = ImageDraw.Draw(out)
     if not boxes:
-        boxes = [cell_box(*position_to_cell(n, rows, cols), rows, cols, out.size, region=region)
-                 for n in range(1, rows * cols + 1)]
+        boxes = [
+            cell_box(*position_to_cell(n, rows, cols), rows, cols, out.size, region=region)
+            for n in range(1, rows * cols + 1)
+        ]
     r = max(14, int(min(min(b[2] - b[0], b[3] - b[1]) for b in boxes) * 0.11))
     for n, (x0, y0, x1, y1) in enumerate(boxes, 1):
         _badge(d, int(x0 + (x1 - x0) * 0.04), int(y0 + (y1 - y0) * 0.04), n, r)
     return out
 
 
-def stamp_number(src, dst, n: int) -> None:
-    img = ImageOps.exif_transpose(Image.open(src)).convert("RGB")
-    r = max(20, int(min(img.size) * 0.07))
-    _badge(ImageDraw.Draw(img), int(img.width * 0.02), int(img.height * 0.02), n, r)
-    img.save(dst, quality=92)
-
-
-def draw_pair(canvas: Image.Image, y: int, row_h: int, front: Optional[Image.Image], back: Optional[Image.Image],
-              n: int) -> None:
+def draw_pair(
+    canvas: Image.Image, y: int, row_h: int, front: Optional[Image.Image], back: Optional[Image.Image], n: int
+) -> None:
     """One book on a row of `canvas`: its front (left) and back (right), scaled to the same size, with its number."""
     size = canvas.width
     for k, im in enumerate((front, back)):
@@ -170,8 +185,9 @@ def book_cover(row: dict, front: Optional[Image.Image], grid, region) -> Optiona
     return crop_book(front, int(row["position"]), grid, region) if front is not None else None
 
 
-def make_review_sheet(front: Optional[Image.Image], rows: list, grid, region, dst: Path, thumb_h: int = 160,
-                      segs=None) -> None:
+def make_review_sheet(
+    front: Optional[Image.Image], rows: list, grid, region, dst: Path, thumb_h: int = 160, segs=None
+) -> None:
     """One picture to eyeball a set: the numbered front photo on top, then per book:
     that book's cover | its back photo | number, ISBN, title, author.
     If the two pictures on a row are not the same book, the photos were sent in the wrong order."""

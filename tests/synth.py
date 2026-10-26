@@ -1,4 +1,5 @@
 """Synthetic test photos: EAN-13 barcodes drawn from scratch (no extra packages), placed on fake book backs."""
+
 from __future__ import annotations
 
 import io
@@ -62,9 +63,19 @@ def barcode_image(code: str, module: int = 4, height: int = 120, quiet: int = 11
     return img.convert("RGB")
 
 
-def book_back(isbn: str, size=(1200, 1700), module: float = 3.0, seed: int = 0, price_code: str = "4710000123459",
-              angle: float = 0.0, blur: float = 0.0, jpeg: int = 0, glare: bool = False, noise: int = 0,
-              addon: str = "") -> Image.Image:
+def book_back(
+    isbn: str,
+    size=(1200, 1700),
+    module: float = 3.0,
+    seed: int = 0,
+    price_code: str = "4710000123459",
+    angle: float = 0.0,
+    blur: float = 0.0,
+    jpeg: int = 0,
+    glare: bool = False,
+    noise: int = 0,
+    addon: str = "",
+) -> Image.Image:
     """A fake back cover: coloured background, 'text' lines, the ISBN barcode and a Taiwan-style price barcode."""
     rnd = random.Random(seed)
     W, H = size
@@ -125,12 +136,31 @@ def set_front(count: int = 10, grid=(2, 5), cell=(300, 420)) -> Image.Image:
     return img
 
 
-TW_ISBNS = [with_check(p) for p in (
-    "978957137463", "978986137195", "978626310112", "978957081234", "978986479919",
-    "978957320000", "978986510012", "978626702345", "978957133333", "978986555555",
-    "978957444444", "978986666666", "978626777777", "978957888888", "978986999999",
-    "978957000111", "978986222333", "978626444555", "978957666777", "978986888999",
-)]
+TW_ISBNS = [
+    with_check(p)
+    for p in (
+        "978957137463",
+        "978986137195",
+        "978626310112",
+        "978957081234",
+        "978986479919",
+        "978957320000",
+        "978986510012",
+        "978626702345",
+        "978957133333",
+        "978986555555",
+        "978957444444",
+        "978986666666",
+        "978626777777",
+        "978957888888",
+        "978986999999",
+        "978957000111",
+        "978986222333",
+        "978626444555",
+        "978957666777",
+        "978986888999",
+    )
+]
 
 
 def cover(size, seed: int, light: bool = False) -> Image.Image:
@@ -140,21 +170,34 @@ def cover(size, seed: int, light: bool = False) -> Image.Image:
     base = (rnd.randint(230, 250),) * 3 if light else tuple(rnd.randint(30, 220) for _ in range(3))
     img = Image.new("RGB", size, base)
     d = ImageDraw.Draw(img)
-    for y in range(h):                              # gentle vertical gradient
+    for y in range(h):  # gentle vertical gradient
         t = y / max(1, h)
         d.line([(0, y), (w, y)], fill=tuple(int(c * (1 - 0.25 * t)) for c in base))
-    d.rectangle([int(w * 0.1), int(h * 0.35), int(w * 0.9), int(h * 0.75)],
-                fill=tuple(rnd.randint(0, 255) for _ in range(3)))
-    for i in range(3):                              # title / author lines
+    d.rectangle(
+        [int(w * 0.1), int(h * 0.35), int(w * 0.9), int(h * 0.75)], fill=tuple(rnd.randint(0, 255) for _ in range(3))
+    )
+    for i in range(3):  # title / author lines
         y = int(h * (0.08 + i * 0.07))
-        d.rectangle([int(w * 0.12), y, int(w * rnd.uniform(0.5, 0.88)), y + max(3, h // 40)],
-                    fill=(20, 20, 20) if light or sum(base) > 380 else (245, 245, 245))
+        d.rectangle(
+            [int(w * 0.12), y, int(w * rnd.uniform(0.5, 0.88)), y + max(3, h // 40)],
+            fill=(20, 20, 20) if light or sum(base) > 380 else (245, 245, 245),
+        )
     d.rectangle([0, 0, w - 1, h - 1], outline=tuple(max(0, c - 40) for c in base), width=2)
     return img
 
 
-def table_set(rows=2, cols=5, book=(330, 470), seed: int = 0, touching: bool = False, tilt: float = 0.0,
-              margin=(160, 140), light_cover: int = -1, shadow: int = 0, carpet: bool = False):
+def table_set(
+    rows=2,
+    cols=5,
+    book=(330, 470),
+    seed: int = 0,
+    touching: bool = False,
+    tilt: float = 0.0,
+    margin=(160, 140),
+    light_cover: int = -1,
+    shadow: int = 0,
+    carpet: bool = False,
+):
     """A realistic front photo: books of slightly different sizes lying on a textured table, not exactly on a grid,
     some a little turned. shadow=N: each book casts a soft shadow N px to its right (light from the left), like a
     photo taken by a window; carpet=True: a grey textured carpet instead of a wooden table.
@@ -165,16 +208,17 @@ def table_set(rows=2, cols=5, book=(330, 470), seed: int = 0, touching: bool = F
     H = margin[1] * 2 + rows * book[1] + (rows - 1) * (gap + 20)
     if carpet:
         import numpy as _np
+
         g = _np.random.default_rng(seed)
         base = _np.clip(125 + g.normal(0, 22, (H // 2 + 1, W // 2 + 1)), 0, 255)
         base = _np.kron(base, _np.ones((2, 2)))[:H, :W]
-        light = _np.linspace(1.12, 0.9, H)[:, None]                 # brighter at the top, like daylight
+        light = _np.linspace(1.12, 0.9, H)[:, None]  # brighter at the top, like daylight
         rgb = _np.stack([base * 0.97, base, base * 1.0], axis=2) * light[..., None]
         img = Image.fromarray(_np.clip(rgb, 0, 255).astype("uint8"))
     else:
         img = Image.new("RGB", (W, H), (150, 110, 75))
         d = ImageDraw.Draw(img)
-        for y in range(0, H, 3):                        # wood grain
+        for y in range(0, H, 3):  # wood grain
             v = rnd.randint(-12, 12)
             d.line([(0, y), (W, y + rnd.randint(-2, 2))], fill=(150 + v, 110 + v, 75 + v), width=3)
     places = []
@@ -190,6 +234,7 @@ def table_set(rows=2, cols=5, book=(330, 470), seed: int = 0, touching: bool = F
         places.append((x, y, bw, bh))
     if shadow:
         from PIL import ImageFilter
+
         sm = Image.new("L", img.size, 0)
         sd = ImageDraw.Draw(sm)
         for x, y, bw, bh in places:

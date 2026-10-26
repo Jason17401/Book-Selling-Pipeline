@@ -1,6 +1,7 @@
 """A tiny stand-in for PyQt6, used ONLY when PyQt6 is not installed (e.g. on a build server), so the review window's own
 logic still gets exercised. Widgets keep their text/values and signals call their slots straight away; drawing does
 nothing. With real PyQt6 installed, tests/test_gui.py uses the real thing instead."""
+
 from __future__ import annotations
 
 import sys
@@ -121,7 +122,7 @@ class QWidget(QObject):
     def isHidden(self):
         return not self._visible
 
-    def reject(self):                      # QDialog: closing it
+    def reject(self):  # QDialog: closing it
         self._visible = False
 
     def findChildren(self, *a):
@@ -316,7 +317,7 @@ class _Layout(QObject):
 
 
 class QFileDialog:
-    chosen: list = []                       # what the next "open file" dialog returns
+    chosen: list = []  # what the next "open file" dialog returns
 
     @staticmethod
     def getOpenFileNames(*a, **k):
@@ -436,7 +437,7 @@ class QTreeWidgetItem:
     def isExpanded(self):
         return self._expanded
 
-    def __getattr__(self, name):          # setIcon, setFont, setFlags, setToolTip ...
+    def __getattr__(self, name):  # setIcon, setFont, setFlags, setToolTip ...
         if name.startswith("__"):
             raise AttributeError(name)
         return _Any()
@@ -487,9 +488,22 @@ def install(monkeypatch) -> None:
         setattr(gui, name, globals()[name])
     gui.QColor = gui.QIcon = gui.QKeySequence = gui.QFont = gui.QPen = _Any
     gui.QDesktopServices = _Any()
-    for name in ("QWidget", "QLabel", "QLineEdit", "QPlainTextEdit", "QComboBox", "QPushButton", "QCheckBox",
-                 "QListWidget", "QListWidgetItem", "QMessageBox", "QTreeWidget", "QTreeWidgetItem", "QSizePolicy",
-                 "QFileDialog"):
+    for name in (
+        "QWidget",
+        "QLabel",
+        "QLineEdit",
+        "QPlainTextEdit",
+        "QComboBox",
+        "QPushButton",
+        "QCheckBox",
+        "QListWidget",
+        "QListWidgetItem",
+        "QMessageBox",
+        "QTreeWidget",
+        "QTreeWidgetItem",
+        "QSizePolicy",
+        "QFileDialog",
+    ):
         setattr(widgets, name, globals()[name])
     widgets.QToolButton = type("QToolButton", (QPushButton,), {})
     widgets.QStyledItemDelegate = _Any

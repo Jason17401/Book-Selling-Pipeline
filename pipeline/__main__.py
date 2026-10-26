@@ -5,8 +5,8 @@ from collections import Counter
 
 from .core import store
 from .core.config import Config
-from .photos.ingest import format_summary, process_inbox
 from .core.validate import find_warnings, refresh_status, validate_rows
+from .photos.ingest import format_summary, process_inbox
 
 
 def main() -> None:
@@ -15,11 +15,14 @@ def main() -> None:
     p = sub.add_parser("ingest", help="decode barcodes in data/inbox, look up metadata, append to books.csv")
     p.add_argument("--expect", type=int, help="total number of books you photographed (sanity check)")
     p.add_argument("--grid", help="rows x cols of the books on the front photo, e.g. 2x4 (default GRID in .env)")
-    p.add_argument("--rotate", type=int, choices=[0, 90, 180, 270], help="degrees clockwise to turn the front photo upright")
+    p.add_argument(
+        "--rotate", type=int, choices=[0, 90, 180, 270], help="degrees clockwise to turn the front photo upright"
+    )
     p.add_argument("--set-size", type=int, help="books per set (default SET_SIZE in .env)")
     sub.add_parser("validate", help="re-check every book and set its status (see DATA_AND_STATUSES.md)")
-    sub.add_parser("setup", aliases=["init"], help="create every data folder (data/inbox, data/listings/shopee/"
-                                                   "template ...) and show where they are")
+    sub.add_parser(
+        "setup", help="create every data folder (data/inbox, data/listings/shopee/template ...) and show where they are"
+    )
     p = sub.add_parser("lookup", help="test the metadata sources for one ISBN and show exactly what each returned")
     p.add_argument("isbn")
     p.add_argument("--fresh", action="store_true", help="ignore the cache and ask the providers again (costs quota)")
@@ -32,26 +35,48 @@ def main() -> None:
     p.add_argument("photo")
     p.add_argument("--save", default="orient.jpg")
     sub.add_parser("enrich", help="look up metadata for needs_manual rows where you have typed in the ISBN")
-    p = sub.add_parser("segment", help="show how a front photo is cut into books (draws the boxes; nothing is saved "
-                                         "to books.csv)")
+    p = sub.add_parser(
+        "segment", help="show how a front photo is cut into books (draws the boxes; nothing is saved to books.csv)"
+    )
     p.add_argument("photo")
     p.add_argument("--save", default="segments.jpg", help="where to write the picture with the boxes")
     p.add_argument("--covers", help="also write each book's cover picture into this folder")
-    p = sub.add_parser("covers", help="cut each book's own cover out of the set photo (and make its front+back "
-                                      "picture) for books processed before this existed")
-    p.add_argument("--redo", action="store_true", help="also cut again the covers already cut (e.g. after an update "
-                                                       "that cuts them better); listed/sold books are left alone")
-    sub.add_parser("genres", help="look up the genre of books saved before genres existed (or still without one)")
-    sub.add_parser("titles", help="Taiwanese books saved with English (or missing) title / author / publisher: get "
-                                  "the Chinese ones (and redo the market price if it was not an exact match)")
-    p = sub.add_parser("market", help="find the price of a NEW copy (eslite / books.com.tw / NCL) and fill empty prices")
+    p = sub.add_parser(
+        "covers",
+        help="make any missing cover cut-outs (each book cut out of the set photo) and front + back pictures",
+    )
+    p.add_argument(
+        "--redo",
+        action="store_true",
+        help="also cut again the covers already cut (e.g. after an update "
+        "that cuts them better); listed/sold books are left alone",
+    )
+    sub.add_parser("genres", help="look up the genre of books that still have none")
+    sub.add_parser(
+        "titles",
+        help="Taiwanese books saved with English (or missing) title / author / publisher: get "
+        "the Chinese ones (and redo the market price if it was not an exact match)",
+    )
+    p = sub.add_parser(
+        "market", help="find the price of a NEW copy (eslite / books.com.tw / NCL) and fill empty prices"
+    )
     p.add_argument("isbn", nargs="?", help="just show it for one ISBN (nothing saved)")
     p.add_argument("--title", default="", help="with an ISBN: title to search by when the ISBN search finds nothing")
-    p.add_argument("--fresh", action="store_true", help="ignore cached market prices and search again (a price read from the price barcode on the book is kept)")
-    p.add_argument("--redo-similar", action="store_true",
-                   help="search again for books whose market price came from another edition or the e-book")
-    p.add_argument("--reprice", action="store_true",
-                   help="also recompute prices that were set automatically (after changing PRICE_RATIO / PRICE_ROUND)")
+    p.add_argument(
+        "--fresh",
+        action="store_true",
+        help="ignore cached market prices and search again (a price read from the price barcode on the book is kept)",
+    )
+    p.add_argument(
+        "--redo-similar",
+        action="store_true",
+        help="search again for books whose market price came from another edition or the e-book",
+    )
+    p.add_argument(
+        "--reprice",
+        action="store_true",
+        help="also recompute prices that were set automatically (after changing PRICE_RATIO / PRICE_ROUND)",
+    )
     p = sub.add_parser("fill", help="set condition/price on books that have none")
     p.add_argument("--set", dest="set_id", help="only this set, e.g. S01")
     p.add_argument("--position", help="only this number within the set")
@@ -59,46 +84,46 @@ def main() -> None:
     p.add_argument("--price")
     p.add_argument("--currency", help="3-letter code, default DEFAULT_CURRENCY in .env")
     p.add_argument("--batch", help="default: all books with blanks")
-    p = sub.add_parser("export-sets", help="one listing per complete set: numbered front photo + text of every book")
-    p.add_argument("--grid", help="rows x cols for the numbers on the front photo (default GRID in .env)")
-    p.add_argument("--no-numbers", action="store_true", help="don't draw numbers on the front photo (physical labels)")
-    p.add_argument("--set-price", type=float, help="one price for the whole set (default: each book's own price)")
-    p.add_argument("--set-currency", help="currency of --set-price (default DEFAULT_CURRENCY)")
-    p.add_argument("--with-barcodes", action="store_true", help="also include each book's back photo, number stamped on")
-    p.add_argument("--no-covers", action="store_true", help="leave out each book's own cover picture")
-    p.add_argument("--force", action="store_true")
-    p = sub.add_parser("shopee", help="sell the products on Shopee (= the Sell products window's upload button): first read "
-                                      "Shopee's files in data/listings/shopee/import (order report, product list), "
-                                      "then make the bulk-upload file for every product that is ready")
+    p = sub.add_parser(
+        "shopee",
+        help="sell the products on Shopee (= the Sell products window's upload button): first read "
+        "Shopee's files in data/listings/shopee/import (order report, product list), "
+        "then make the bulk-upload file for every product that is ready",
+    )
     p.add_argument("files", nargs="*", help="Shopee files to read instead of the import folder")
-    p.add_argument("--redo", nargs="+", default=[], metavar="PRODUCT_CODE",
-                   help="put these products into a new upload file again (e.g. Shopee rejected the last one)")
+    p.add_argument(
+        "--redo",
+        nargs="+",
+        default=[],
+        metavar="PRODUCT_CODE",
+        help="put these products into a new upload file again (e.g. Shopee rejected the last one)",
+    )
     p.add_argument("--no-export", action="store_true", help="only read Shopee's files, make no upload file")
     p.add_argument("--open", action="store_true", help="open the folder of the upload file afterwards")
-    p = sub.add_parser("product-status", aliases=["set-status"],
-                       help="change a product's status by hand, e.g. sold at a market, or back to ready after you "
-                            "deleted it on Shopee")
+    p = sub.add_parser(
+        "product-status",
+        help="change a product's status by hand, e.g. sold at a market, or back to ready after you "
+        "deleted it on Shopee",
+    )
     p.add_argument("product_code", help="e.g. 20261008-153012-S01 (python -m pipeline products lists them)")
     p.add_argument("status", choices=["ready", "listed", "sold", "withdrawn"])
     p.add_argument("--note", default="", help="a note to keep with the product")
-    p = sub.add_parser("shopee-link", help="save the Shopee link of a product you published (also possible in the "
-                                           "review window)")
+    p = sub.add_parser(
+        "shopee-link", help="save the Shopee link of a product you published (also possible in the review window)"
+    )
     p.add_argument("product_code")
     p.add_argument("url")
-    sub.add_parser("products", aliases=["sets"], help="every product: status, price, title, and what is missing")
-    p = sub.add_parser("labels", help="write a printable sheet of numbers to cut out and place beside the books")
-    p.add_argument("--count", type=int, default=10)
+    sub.add_parser("products", help="every product: status, price, title, and what is missing")
     sub.add_parser("status", help="row counts by status")
     sub.add_parser("review", help="open the review window: see and fix books that need attention")
     sub.add_parser("todo", help="list, in plain words, what each book still needs")
     sub.add_parser("bot", help="run the Telegram bot")
     a = ap.parse_args()
     cfg = Config.from_env()
-    a.cmd = {"init": "setup", "set-status": "product-status", "sets": "products"}.get(a.cmd, a.cmd)
-    for line in cfg.ensure_dirs():          # data folders always there; older files brought up to date
-        print("Updated:", line)
+    cfg.ensure_dirs()  # every data folder is always there
     if a.cmd == "ingest":
         from .photos.grid import parse_grid
+
         cfg.set_size = a.set_size or cfg.set_size
         if a.grid:
             cfg.grid = parse_grid(a.grid)
@@ -107,29 +132,37 @@ def main() -> None:
 
     if a.cmd == "ingest":
         from .core.progress import terminal
+
         with terminal():
             summary = process_inbox(cfg, expect=a.expect)
         print(format_summary(summary))
     elif a.cmd == "setup":
         print(f"Data folder: {cfg.data_dir.resolve()} - every folder below it is there now:")
-        for what, d in (("photos from the bot / your phone", cfg.inbox),
-                        ("Shopee's template (put the downloaded Excel file here)", cfg.template_dir),
-                        ("the Shopee upload files made for you", cfg.uploads_dir),
-                        ("Shopee's order reports, to read", cfg.shopee_import),
-                        ("each product's listing photos", cfg.photos_dir)):
+        for what, d in (
+            ("photos from the bot / your phone", cfg.inbox),
+            ("Shopee's template (put the downloaded Excel file here)", cfg.template_dir),
+            ("the Shopee upload files made for you", cfg.uploads_dir),
+            ("Shopee's order reports, to read", cfg.shopee_import),
+            ("each product's listing photos", cfg.photos_dir),
+        ):
             print(f"  {what}:\n    {d.resolve()}")
     elif a.cmd == "lookup":
         import logging
+
         logging.basicConfig(level=logging.WARNING, format="%(message)s")
         logging.getLogger("pipeline.lookup").setLevel(logging.INFO)  # show each Google search tried
         from .core import net
         from .core.isbn import normalize
         from .sources.lookup import FIELDS, call_provider, is_taiwan, providers_for
+
         isbn = normalize(a.isbn)
         if not isbn:
             raise SystemExit(f"{a.isbn} is not a valid ISBN (checksum failed)")
         names = tuple(x.strip() for x in a.only.split(",")) if a.only else providers_for(isbn, cfg)
-        print(f"ISBN {isbn} ({'Taiwan: BOOK_PROVIDERS_TW' if is_taiwan(isbn) else 'BOOK_PROVIDERS'}) -> {', '.join(names)}")
+        print(
+            f"ISBN {isbn} ({'Taiwan: BOOK_PROVIDERS_TW' if is_taiwan(isbn) else 'BOOK_PROVIDERS'}) -> "
+            f"{', '.join(names)}"
+        )
         merged, used = {}, []
         for name in names:
             try:
@@ -138,20 +171,30 @@ def main() -> None:
                 for k in FIELDS:
                     if got.get(k) and not merged.get(k):
                         merged[k] = got[k]
-                shown = {k: (v[:80] + "..." if len(v) > 80 else v) for k, v in got.items() if v} or "nothing found (or no key set)"
+                shown = {
+                    k: (v[:80] + "..." if len(v) > 80 else v) for k, v in got.items() if v
+                } or "nothing found (or no key set)"
                 print(f"[{name}{' (cached)' if where == 'cache' else ''}] {shown}")
             except Exception as exc:
                 print(f"[{name}] ERROR: {net.redact(exc)}")
         print(f"\nMerged title/author: {merged.get('title')!r} / {merged.get('author')!r}  (sources: {'+'.join(used)})")
-        print(f"Google Books calls today: {net.DailyCounter(cfg.cache_dir / 'quota.json').used('google')}/{cfg.google_daily_limit}")
+        print(
+            f"Google Books calls today: {net.DailyCounter(cfg.cache_dir / 'quota.json').used('google')}"
+            f"/{cfg.google_daily_limit}"
+        )
     elif a.cmd == "quota":
         from .core import net
-        print(f"Google Books calls today (US Pacific day {net.pacific_today()}): "
-              f"{net.DailyCounter(cfg.cache_dir / 'quota.json').used('google')}/{cfg.google_daily_limit}")
+
+        print(
+            f"Google Books calls today (US Pacific day {net.pacific_today()}): "
+            f"{net.DailyCounter(cfg.cache_dir / 'quota.json').used('google')}/{cfg.google_daily_limit}"
+        )
     elif a.cmd == "check-barcode":
         import time as _t
+
         from .photos.decode import ADDONS, available_engines, decode_isbn_image, load_image
         from .sources.market import addon_price
+
         print(f"Readers installed and enabled: {', '.join(available_engines()) or 'NONE - pip install zxing-cpp'}")
         for ph in a.photos:
             t0 = _t.time()
@@ -159,22 +202,34 @@ def main() -> None:
             got = decode_isbn_image(img, effort=a.effort)
             addon = ADDONS.get(got, "") if got else ""
             price = addon_price(addon, got or "") if addon else None
-            shown = f"   price barcode {addon}" + (f" = {price[0]} {price[1]}" if price else " (currency unknown)") \
-                if addon else ("   price barcode: not read" if got else "")
+            shown = (
+                f"   price barcode {addon}" + (f" = {price[0]} {price[1]}" if price else " (currency unknown)")
+                if addon
+                else ("   price barcode: not read" if got else "")
+            )
             print(f"{ph}: {got or 'NOT READ'}{shown}   ({img.width}x{img.height}, {_t.time() - t0:.1f}s)")
     elif a.cmd == "orient":
         from .photos.decode import exif_orientation, load_image
         from .photos.grid import make_orient_sheet
+
         img = load_image(a.photo)
         tag = exif_orientation(a.photo)
-        print(f"Photo size after applying any EXIF rotation: {img.width}x{img.height} px "
-              f"({'landscape' if img.width >= img.height else 'portrait'})")
+        print(
+            f"Photo size after applying any EXIF rotation: {img.width}x{img.height} px "
+            f"({'landscape' if img.width >= img.height else 'portrait'})"
+        )
         print(f"EXIF orientation tag in the file: {tag if tag else 'none (the phone/Telegram did not keep one)'}")
         make_orient_sheet(img, a.save)
-        print(f"Open {a.save}. Find the panel where the books are the right way up, then put that ROTATE=<number> in .env")
-        print(f"Currently ROTATE={cfg.rotate}. Remember: it must also make the photo landscape if your grid is wider than tall.")
+        print(
+            f"Open {a.save}. Find the panel where the books are the right way up, then put that ROTATE=<number> in .env"
+        )
+        print(
+            f"Currently ROTATE={cfg.rotate}. Remember: it must also make the photo landscape if your grid is wider "
+            "than tall."
+        )
     elif a.cmd == "enrich":
         from .photos.ingest import enrich_rows
+
         # look books up WITHOUT holding the file (can take a while), then write only the rows that changed
         work = store.read_rows(cfg.csv_path)
         before = {r["sku"]: dict(r) for r in work}
@@ -185,30 +240,41 @@ def main() -> None:
             for r in rows:
                 if r["sku"] in changed and r == before.get(r["sku"]):  # skip rows someone edited meanwhile
                     r.update(changed[r["sku"]])
+
         store.update_rows(cfg.csv_path, apply)
         print(f"enriched {n} row(s)")
     elif a.cmd == "segment":
         from .photos.grid import load_upright
         from .photos.segment import cut_book, draw_segments, find_books
+
         img = load_upright(a.photo, cfg.rotate)
         segs = find_books(img, cfg.grid, cfg.region, cfg.segment)
         draw_segments(img, segs).save(a.save, quality=90)
         for n, sg in enumerate(segs, 1):
             x0, y0, x1, y1 = sg.box
-            print(f"  book {n:>2}: {x1 - x0}x{y1 - y0} px at ({x0},{y0})"
-                  + (f", turned {sg.angle:+.1f} deg" if sg.angle else "") + ("" if sg.found else "  NOT FOUND (grid cell)"))
+            print(
+                f"  book {n:>2}: {x1 - x0}x{y1 - y0} px at ({x0},{y0})"
+                + (f", turned {sg.angle:+.1f} deg" if sg.angle else "")
+                + ("" if sg.found else "  NOT FOUND (grid cell)")
+            )
         if a.covers:
             from pathlib import Path as _P
+
             _P(a.covers).mkdir(parents=True, exist_ok=True)
             for n, sg in enumerate(segs, 1):
                 cut_book(img, sg, cfg.segment_margin, segs).save(_P(a.covers) / f"{n:02d}_cover.jpg", quality=95)
-        print(f"wrote {a.save}" + (f" and covers in {a.covers}" if a.covers else "")
-              + f"   (GRID={cfg.grid[0]}x{cfg.grid[1]}, SEGMENT={cfg.segment}, SEGMENT_MARGIN={cfg.segment_margin})")
+        print(
+            f"wrote {a.save}"
+            + (f" and covers in {a.covers}" if a.covers else "")
+            + f"   (GRID={cfg.grid[0]}x{cfg.grid[1]}, SEGMENT={cfg.segment}, SEGMENT_MARGIN={cfg.segment_margin})"
+        )
     elif a.cmd == "covers":
         from pathlib import Path as _P
+
         from .photos.decode import load_image
         from .photos.segment import cut_book, find_books, save_segments
         from .photos.setlayout import save_front_and_back
+
         work = store.read_rows(cfg.csv_path)
         made = {}
         sets = {}
@@ -216,15 +282,20 @@ def main() -> None:
         for r in work:
             whole = r.get("set_photo") or r.get("front_photo")
             own = r.get("front_photo") and r["front_photo"] != whole
-            cut_before = own and _P(r["front_photo"]).name == "cover.jpg"     # cut by the pipeline, not your own photo
+            cut_before = own and _P(r["front_photo"]).name == "cover.jpg"  # cut by the pipeline, not your own photo
             if r.get("status") in ("listed", "sold") or not whole:
                 continue
             if own and not (a.redo and cut_before):
-                if not r.get("front_back_photo") and r.get("back_photo"):    # cut before front+back pictures existed
+                if not r.get("front_back_photo") and r.get("back_photo"):  # cut before front+back pictures existed
                     try:
-                        pair = save_front_and_back(_P(r["front_photo"]).with_name("front_back.jpg"),
-                                                   load_image(r["front_photo"]), None, int(r.get("position") or 0),
-                                                   r["back_photo"], cfg)
+                        pair = save_front_and_back(
+                            _P(r["front_photo"]).with_name("front_back.jpg"),
+                            load_image(r["front_photo"]),
+                            None,
+                            int(r.get("position") or 0),
+                            r["back_photo"],
+                            cfg,
+                        )
                     except Exception:
                         pair = None
                     if pair:
@@ -234,7 +305,7 @@ def main() -> None:
             sets.setdefault(whole, []).append(r)
         for whole, rows_ in sets.items():
             try:
-                img = load_image(whole)            # already turned upright when it was stored
+                img = load_image(whole)  # already turned upright when it was stored
             except Exception as exc:
                 print(f"  {whole}: cannot open ({exc})")
                 continue
@@ -248,8 +319,11 @@ def main() -> None:
                 dst.parent.mkdir(parents=True, exist_ok=True)
                 cover = cut_book(img, segs[pos - 1], cfg.segment_margin, segs)
                 cover.save(dst, quality=95)
-                pair = save_front_and_back(dst.with_name("front_back.jpg"), cover, img, pos, r.get("back_photo"), cfg) \
-                    if r.get("back_photo") else None
+                pair = (
+                    save_front_and_back(dst.with_name("front_back.jpg"), cover, img, pos, r.get("back_photo"), cfg)
+                    if r.get("back_photo")
+                    else None
+                )
                 made[r["sku"]] = (str(dst), whole, str(pair or ""))
             print(f"  {whole}: {sum(1 for r in rows_ if r['sku'] in made)} cover(s)")
 
@@ -257,10 +331,12 @@ def main() -> None:
             for r in rows:
                 if r["sku"] in made:
                     r["front_photo"], r["set_photo"], r["front_back_photo"] = made[r["sku"]]
+
         store.update_rows(cfg.csv_path, apply)
         print(f"{len(made) - pairs} book cover(s) cut out" + (f", {pairs} front+back picture(s) made" if pairs else ""))
     elif a.cmd == "genres":
         from .sources.lookup import lookup_book
+
         work = store.read_rows(cfg.csv_path)
         found = {}
         for r in work:
@@ -275,13 +351,16 @@ def main() -> None:
             for r in rows:
                 if r["sku"] in found and not r.get("genre"):
                     r["genre"] = found[r["sku"]]
+
         store.update_rows(cfg.csv_path, apply)
         print(f"{len(found)} genre(s) added")
     elif a.cmd == "titles":
         import logging
+
         logging.basicConfig(level=logging.WARNING, format="%(message)s")
         logging.getLogger("pipeline.market").setLevel(logging.INFO)
         from .photos.ingest import chinese_titles
+
         work = store.read_rows(cfg.csv_path)
         before = {r["sku"]: dict(r) for r in work}
         skus = chinese_titles(work, cfg)
@@ -291,49 +370,68 @@ def main() -> None:
             for r in rows:
                 if r["sku"] in fixed and r == before.get(r["sku"]):  # skip rows someone edited meanwhile
                     r.update(fixed[r["sku"]])
+
         store.update_rows(cfg.csv_path, apply)
         for r in fixed.values():
-            print(f"{r['sku']}  {r['isbn13']}  -> {r['title']} / {r.get('author') or '-'} / {r.get('publisher') or '-'}   market: {r.get('market_price') or '-'} "
-                  f"{r.get('market_currency', '')} ({r.get('market_match') or 'not found'})")
+            print(
+                f"{r['sku']}  {r['isbn13']}  -> {r['title']} / {r.get('author') or '-'} / "
+                f"{r.get('publisher') or '-'}   market: {r.get('market_price') or '-'} "
+                f"{r.get('market_currency', '')} ({r.get('market_match') or 'not found'})"
+            )
         print(f"{len(fixed)} book(s) now have their Chinese details")
     elif a.cmd == "market":
         import logging
+
         logging.basicConfig(level=logging.WARNING, format="%(message)s")
-        logging.getLogger("pipeline.market").setLevel(logging.INFO)   # show every search tried
-        from .sources.market import (MARKET_FIELDS, apply_market, describe, find_market_price, forget_market,
-                                     from_barcode, suggest_price)
+        logging.getLogger("pipeline.market").setLevel(logging.INFO)  # show every search tried
+        from .sources.market import (
+            MARKET_FIELDS,
+            apply_market,
+            describe,
+            find_market_price,
+            forget_market,
+            from_barcode,
+            suggest_price,
+        )
+
         print(describe(cfg))
         if a.isbn:
             got = find_market_price(a.isbn, a.title, cfg, use_cache=not a.fresh)
             if not got.get("market_price"):
                 print("No market price found.", "; ".join(got.get("_errors", [])))
             else:
-                print(f"New copy: {got['market_price']} {got['market_currency']}  ({got['market_source']})  {got['market_url']}")
+                print(
+                    f"New copy: {got['market_price']} {got['market_currency']}  ({got['market_source']})  "
+                    f"{got['market_url']}"
+                )
                 sug = suggest_price(got["market_price"], got["market_currency"], cfg)
                 print(f"Your price: {sug['price']} {sug['currency']}  ({sug['price_basis']})")
         else:
-            work = store.read_rows(cfg.csv_path)       # search WITHOUT holding the file, then write only changes
+            work = store.read_rows(cfg.csv_path)  # search WITHOUT holding the file, then write only changes
             changed = {}
             for r in work:
                 if r.get("status") in ("listed", "sold") or not r.get("isbn13"):
                     continue
                 old = dict(r)
                 redo = a.redo_similar and r.get("market_match") in ("similar", "ebook")
-                if (a.fresh or redo) and not from_barcode(r):     # the price printed on the book stays
+                if (a.fresh or redo) and not from_barcode(r):  # the price printed on the book stays
                     forget_market(r)
                 print(f"{r['sku']}  {r['isbn13']}  {r.get('title', '')[:30]}")
                 for problem in apply_market(r, cfg, use_cache=not (a.fresh or redo), reprice=a.reprice):
                     print("   problem:", problem)
                 if r != old:
                     changed[r["sku"]] = {k: r.get(k, "") for k in MARKET_FIELDS + ("price", "currency", "price_basis")}
-                    print(f"   new copy {r.get('market_price')} {r.get('market_currency')} -> price "
-                          f"{r.get('price')} {r.get('currency')}  ({r.get('price_basis')})")
+                    print(
+                        f"   new copy {r.get('market_price')} {r.get('market_currency')} -> price "
+                        f"{r.get('price')} {r.get('currency')}  ({r.get('price_basis')})"
+                    )
 
             def apply(rows):
                 for r in rows:
                     if r["sku"] in changed:
                         r.update(changed[r["sku"]])
                         refresh_status(r, cfg)
+
             store.update_rows(cfg.csv_path, apply)
             print(f"updated {len(changed)} book(s)")
     elif a.cmd == "validate":
@@ -348,6 +446,7 @@ def main() -> None:
         for w in find_warnings(rows):
             print("  WARNING:", w)
     elif a.cmd == "fill":
+
         def fill(rows):
             n = 0
             for r in rows:
@@ -365,48 +464,44 @@ def main() -> None:
                     r["price"], r["currency"], n = a.price, (a.currency or cfg.default_currency).upper(), n + 1
                 refresh_status(r, cfg)
             return n
+
         print(f"filled {store.update_rows(cfg.csv_path, fill)} field(s)")
-    elif a.cmd == "export-sets":
-        from .photos.grid import parse_grid
-        from .apps.products import build_set_listings
-        res = build_set_listings(store.read_rows(cfg.csv_path), cfg, grid=parse_grid(a.grid) if a.grid else None,
-                                 set_price=a.set_price, set_currency=(a.set_currency or "").upper(),
-                                 with_backs=a.with_barcodes, force=a.force, numbers=not a.no_numbers,
-                                 with_covers=not a.no_covers)
-        print(f"exported {len(res['made'])} set listing(s) to {cfg.listings_dir / 'sets'}")
-        for key, why in res["skipped"]:
-            print(f"  skipped {key}: {why}")
     elif a.cmd == "shopee":
         from .apps import shopee
+
         try:
             out = shopee.run(cfg, files=a.files or None, do_export=not a.no_export, redo=a.redo)
         except shopee.ShopeeError as exc:
-            raise SystemExit(f"Shopee: {exc}")
+            raise SystemExit(f"Shopee: {exc}") from exc
         print("\n".join(out["text"]))
         exp = out.get("export") or {}
         if a.open and exp.get("file"):
             import os
+
             if hasattr(os, "startfile"):
-                os.startfile(str(exp["file"].parent))       # Windows: show the upload file in Explorer
+                os.startfile(str(exp["file"].parent))  # Windows: show the upload file in Explorer
     elif a.cmd == "product-status":
         from .apps.products import change_product_status, refresh_products
+
         refresh_products(cfg)
         try:
             msgs = change_product_status(cfg, a.product_code, a.status, a.note)
         except (KeyError, ValueError) as exc:
-            raise SystemExit(str(exc).strip("'\""))
+            raise SystemExit(str(exc).strip("'\"")) from exc
         print(f"{a.product_code}: {a.status}")
         for m in msgs:
             print("  TAKE DOWN:", m)
     elif a.cmd == "shopee-link":
         from .apps import shopee
+
         try:
             li = shopee.set_link(cfg, a.product_code, a.url)
         except shopee.ShopeeError as exc:
-            raise SystemExit(str(exc))
+            raise SystemExit(str(exc)) from exc
         print(f"{a.product_code}: on Shopee, item {li['shopee_item_id']}")
     elif a.cmd == "products":
         from .apps.products import PRODUCT_STATUS_HELP, refresh_products
+
         sets = refresh_products(cfg)
         for st in PRODUCT_STATUS_HELP:
             mine = [x for x in sets if x["status"] == st]
@@ -419,24 +514,22 @@ def main() -> None:
                     print(f"      {x['errors']}")
         if not sets:
             print("no products yet")
-    elif a.cmd == "labels":
-        from .apps.products import make_label_sheet
-        cfg.ensure_dirs()
-        dst = cfg.data_dir / "labels.png"
-        make_label_sheet(dst, a.count)
-        print(f"wrote {dst} - print it, cut out the numbers")
     elif a.cmd == "status":
         counts = Counter(r["status"] for r in store.read_rows(cfg.csv_path))
-        meaning = {"needs_manual": "book not identified yet (ISBN / title / author missing)",
-                   "enriched": "identified, but price or condition missing/invalid, or a photo missing",
-                   "to_check": "complete - give it a quick check in the review window and Save",
-                   "validated": "checked by you, ready for a listing", "listed": "its product (set) is on sale",
-                   "sold": "sold"}
+        meaning = {
+            "needs_manual": "book not identified yet (ISBN / title / author missing)",
+            "enriched": "identified, but price or condition missing/invalid, or a photo missing",
+            "to_check": "complete - give it a quick check in the review window and Save",
+            "validated": "checked by you, ready for a listing",
+            "listed": "its product (set) is on sale",
+            "sold": "sold",
+        }
         for st in ("needs_manual", "enriched", "to_check", "validated", "listed", "sold"):
             print(f"  {st:<13}{counts.pop(st, 0):>5}   {meaning[st]}")
         for st, n in counts.items():
             print(f"  {st:<13}{n:>5}")
         from .apps.products import PRODUCT_STATUS_HELP, refresh_products
+
         sets = Counter(x["status"] for x in refresh_products(cfg))
         if sets:
             print("Products (python -m pipeline products for details):")
@@ -447,13 +540,15 @@ def main() -> None:
         try:
             from .apps.gui import run as run_gui
         except ImportError as exc:
-            raise SystemExit(f"The review window needs PyQt6: pip install -r requirements.txt  ({exc})")
+            raise SystemExit(f"The review window needs PyQt6: pip install -r requirements.txt  ({exc})") from exc
         run_gui(cfg)
     elif a.cmd == "todo":
         from .apps.editing import todo_text
+
         print(todo_text(cfg))
     elif a.cmd == "bot":
         from .apps.bot import run
+
         run(cfg)
 
 

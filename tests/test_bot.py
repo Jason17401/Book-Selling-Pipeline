@@ -1,4 +1,5 @@
 """Telegram bot download retries (no network: Telegram is faked)."""
+
 import asyncio
 import importlib
 import sys
@@ -50,6 +51,7 @@ def test_timeout_is_retried_then_saved(bot, tmp_path):
     async def getter(**kw):
         assert kw["read_timeout"] == 30
         return f
+
     dest = tmp_path / "0000000001.jpg"
     assert run(bot.fetch_with_retries(getter, dest, 30, sleep=no_sleep)) == 3
     assert dest.read_bytes() == b"photo"
@@ -60,6 +62,7 @@ def test_gives_up_after_all_attempts_and_leaves_no_half_file(bot, tmp_path):
 
     async def getter(**kw):
         return f
+
     dest = tmp_path / "0000000001.jpg"
     with pytest.raises(bot.TimedOut):
         run(bot.fetch_with_retries(getter, dest, 30, sleep=no_sleep))
@@ -72,24 +75,27 @@ def test_send_with_retries_gives_up_quietly(bot):
     async def flaky():
         calls.append(1)
         raise bot.TimedOut("Timed out")
+
     assert run(bot.send_with_retries(flaky, sleep=no_sleep)) is False and len(calls) == 3
 
     async def ok():
         return None
+
     assert run(bot.send_with_retries(ok, sleep=no_sleep)) is True
 
 
 def test_downloads_tracker_waits_for_parallel_downloads(bot):
     async def main():
         d = bot.Downloads()
-        assert await d.wait(0.1) is True                       # nothing downloading
+        assert await d.wait(0.1) is True  # nothing downloading
         d.start()
         d.start()
-        assert await d.wait(0.05) is False                     # still busy
+        assert await d.wait(0.05) is False  # still busy
         waiter = asyncio.create_task(d.wait(1))
         d.done()
         await asyncio.sleep(0)
         assert not waiter.done()
         d.done()
         assert await waiter is True and d.count == 0
+
     run(main())

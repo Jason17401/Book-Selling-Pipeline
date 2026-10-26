@@ -1,5 +1,6 @@
 """Shared plumbing for ingesting photos: listing/ordering the inbox, moving files, captions, the run summary.
 The set logic itself (1 front photo + one back photo per book) is in setlayout.py."""
+
 from __future__ import annotations
 
 import re
@@ -14,13 +15,31 @@ from ..sources.lookup import lookup_book
 
 IMG_EXT = {".jpg", ".jpeg", ".png", ".heic", ".heif", ".webp"}
 _COND_WORDS = {
-    "new": "new", "asnew": "as_new", "as_new": "as_new", "likenew": "as_new", "like_new": "as_new", "mint": "as_new",
-    "good": "good", "ok": "fair", "fair": "fair", "acceptable": "fair",
-    "poor": "poor", "worn": "poor",
+    "new": "new",
+    "asnew": "as_new",
+    "as_new": "as_new",
+    "likenew": "as_new",
+    "like_new": "as_new",
+    "mint": "as_new",
+    "good": "good",
+    "ok": "fair",
+    "fair": "fair",
+    "acceptable": "fair",
+    "poor": "poor",
+    "worn": "poor",
 }
 # Chinese condition words in a caption (longest first, so 近全新 is not read as 全新)
-_COND_ZH = [("差強人意", "poor"), ("近全新", "as_new"), ("九成新", "as_new"), ("全新", "new"), ("良好", "good"),
-            ("八成新", "good"), ("普通", "fair"), ("七成新", "fair"), ("差", "poor")]
+_COND_ZH = [
+    ("差強人意", "poor"),
+    ("近全新", "as_new"),
+    ("九成新", "as_new"),
+    ("全新", "new"),
+    ("良好", "good"),
+    ("八成新", "good"),
+    ("普通", "fair"),
+    ("七成新", "fair"),
+    ("差", "poor"),
+]
 
 
 @dataclass
@@ -101,6 +120,7 @@ def _move(src: Path, dest_dir: Path) -> Path:
 
 def process_inbox(cfg: Config, lookup: Callable = lookup_book, expect: Optional[int] = None, decode=None) -> "Summary":
     from .setlayout import process_sets
+
     return process_sets(cfg, decode=decode, lookup=lookup, expect=expect)
 
 
@@ -114,6 +134,7 @@ def note_lookup_errors(s: Summary, meta: dict) -> None:
 def enrich_rows(rows: list, cfg: Config, lookup: Callable = lookup_book) -> int:
     """For needs_manual rows that now have an ISBN (typed in by you), fetch metadata and promote to enriched."""
     from ..core.isbn import normalize
+
     n = 0
     for r in rows:
         if r.get("status") != "needs_manual":
@@ -130,8 +151,10 @@ def enrich_rows(rows: list, cfg: Config, lookup: Callable = lookup_book) -> int:
             r["book_source"] = r.get("book_source") or meta.get("source", "")
         if cfg.market_providers:
             from ..sources.market import apply_market
+
             apply_market(r, cfg)
         from ..core.validate import refresh_status
+
         refresh_status(r, cfg)
         if r.get("title") and r.get("author"):
             n += 1
@@ -143,9 +166,10 @@ def chinese_titles(rows: list, cfg: Config, lookup: Callable = lookup_book) -> l
     publisher, or a Chinese source could not be reached: look them up again and take the Chinese title / author /
     publisher / genre (an empty field is filled too). The English title and author are kept in notes; the market price
     is searched again if it was not an exact match. Listed / sold books are left alone. Returns the skus changed."""
+    from ..core.validate import DONE, refresh_status
     from ..sources.lookup import has_cjk, is_taiwan
     from ..sources.market import apply_market, forget_market
-    from ..core.validate import DONE, refresh_status
+
     changed = []
     for r in rows:
         isbn = r.get("isbn13", "")
@@ -159,7 +183,7 @@ def chinese_titles(rows: list, cfg: Config, lookup: Callable = lookup_book) -> l
         for k in ("title", "author", "publisher", "genre"):
             new = meta.get(k) or ""
             if not new or has_cjk(r.get(k)) or (r.get(k) and not has_cjk(new)):
-                continue                       # already Chinese, or nothing better (Chinese) found
+                continue  # already Chinese, or nothing better (Chinese) found
             if r.get(k) and k in ("title", "author"):
                 notes.append(f"{'English title' if k == 'title' else 'author in English'}: {r[k]}")
             r[k] = new
@@ -169,8 +193,11 @@ def chinese_titles(rows: list, cfg: Config, lookup: Callable = lookup_book) -> l
             r["notes"] = "; ".join(x for x in [r.get("notes")] + notes if x)
         src = [x for x in (r.get("book_source") or "").split("+") if x]
         r["book_source"] = "+".join(dict.fromkeys(src + [x for x in (meta.get("source") or "").split("+") if x]))
-        if r["title"] != before.get("title") and cfg.market_providers and \
-                r.get("market_match") not in ("exact", "manual"):
+        if (
+            r["title"] != before.get("title")
+            and cfg.market_providers
+            and r.get("market_match") not in ("exact", "manual")
+        ):
             forget_market(r)
             apply_market(r, cfg)
         refresh_status(r, cfg)
@@ -187,10 +214,14 @@ def format_summary(s: Summary) -> str:
         price = f"{r['price']} {r['currency']}" if r.get("price") else "-"
         if r.get("market_price"):
             price += f", new {r['market_price']} {r['market_currency']}"
-        lines.append(f"{r['set_id']}-{int(r['position']):02d}  {r['isbn13'] or '-------------'}  {title}  "
-                     f"[{r['condition'] or '-'}, {price}]")
+        lines.append(
+            f"{r['set_id']}-{int(r['position']):02d}  {r['isbn13'] or '-------------'}  {title}  "
+            f"[{r['condition'] or '-'}, {price}]"
+        )
     lines += s.notes
     lines += [f"WARNING: {w}" for w in s.warnings]
-    lines += [f"CHECK THIS: {p} (on each row, the book from the front photo and the back photo must match)"
-              for p in s.review_sheets]
+    lines += [
+        f"CHECK THIS: {p} (on each row, the book from the front photo and the back photo must match)"
+        for p in s.review_sheets
+    ]
     return "\n".join(lines)

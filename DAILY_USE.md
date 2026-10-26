@@ -173,19 +173,16 @@ buttons or `.bat` files; the rest are for fixing and checking.
 | `products` | every product by status, with price, title and what stops it |
 | `product-status <code> <status>` | change a product by hand: `ready`, `listed`, `sold`, `withdrawn` (`--note "sold at the fair"`) |
 | `shopee-link <code> <link>` | save the Shopee link of a product you published |
-| `export-sets` | a plain listing folder per finished set (photo + text, any platform). `--set-price 40 --set-currency NZD` for one bundle price, `--with-barcodes`, `--force` to redo |
 | `ingest` | processes `data\inbox` without the bot (photos copied there yourself) |
 | `market` | finds market prices for books that have none. `--redo-similar` searches again for books priced from another edition; `--reprice` recomputes automatic prices after changing `PRICE_RATIO`; `market <isbn>` tests one book |
 | `titles` | Taiwanese books saved with English (or missing) title / author / publisher get the Chinese ones (books not yet listed) |
-| `genres` | looks up the genre of books saved before genres existed |
+| `genres` | looks up the genre of books that still have none |
 | `segment <photo>` | shows how a front photo is cut into books (`--covers folder` also saves the cut-outs) |
-| `covers` | cuts each book's own cover out of the set photo for books processed before this existed (`--redo` cuts all not-yet-listed covers again, e.g. after an update) |
+| `covers` | makes any missing cover cut-outs and front + back pictures (`--redo` cuts every not-yet-listed book's cover again, e.g. after an update that cuts them better) |
 | `lookup <isbn>` | shows what each book source returns for one ISBN (`--fresh` ignores the cache) |
 | `check-barcode <photo>` | tries to read the barcode in a photo (`--effort max` tries hardest) |
 | `orient <photo>` | helps you find `ROTATE` for sideways front photos |
-| `fill`, `enrich`, `validate`, `labels`, `quota` | bulk-fill condition/price; re-look-up books whose ISBN you typed; recheck all statuses; printable number labels; Google calls used today |
-
-(`sets` and `set-status` still work as the older names of `products` and `product-status`.)
+| `fill`, `enrich`, `validate`, `quota` | bulk-fill condition/price; re-look-up books whose ISBN you typed; recheck all statuses; Google calls used today |
 
 ## 8. Troubleshooting
 
@@ -197,7 +194,7 @@ buttons or `.bat` files; the rest are for fixing and checking.
 | A cover picture is cut badly | `python -m pipeline segment <front photo>` shows the boxes; leave gaps between books, use a plainer surface, or `REGION` to ignore clutter around the books; `SEGMENT=grid` as a last resort |
 | Cover pictures are blurry | send the front photo as a File (Telegram shrinks normal photos) |
 | A barcode won't read | type the ISBN in the review window, or test the photo with `check-barcode` |
-| No market price for many books | add a Tavily key ([SETUP.md step 4](SETUP.md#4-free-keys-for-finding-more-books)); if books.com.tw blocks you, its pages are saved in `data\cache\debug` |
+| No market price for many books | add a Tavily key ([API_KEYS.md](API_KEYS.md#2-tavily-tavily_api_key)); if books.com.tw blocks you, its pages are saved in `data\cache\debug` |
 | No market price for a book you can find online | press **Find** in the review window (it always searches again), or paste the shop's link into **Shop link**. What the search tried is in `data\cache\debug\..._market_<isbn>.html` - send it if the book's shop page exists but was not found |
 | `books.csv is busy` | close it in Excel / another program |
 | The bot window shows odd characters like `←[1A` | set `PLAIN_PROGRESS=1` in `.env` |

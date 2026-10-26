@@ -1,12 +1,13 @@
 """Sets: 1 front photo + SET_SIZE back photos per set."""
+
 from pathlib import Path
 
 from PIL import Image
+from synth import TW_ISBNS, book_back, set_front
 
 from pipeline.core import store
 from pipeline.core.config import Config
 from pipeline.photos.setlayout import describe_progress, process_sets, progress, split_by_count
-from synth import TW_ISBNS, book_back, set_front
 
 
 def _photos(tmp_path, names):
@@ -59,15 +60,15 @@ def test_lost_photo_is_detected_and_next_set_stays_aligned(tmp_path):
     sets = split_by_count(photos, 10, dec)
     assert len(sets) == 2
     assert len(sets[0].books) == 9 and any("MISSING" in n for n in sets[0].notes)
-    assert sets[1].front == photos[10]                        # the real front of set 2
+    assert sets[1].front == photos[10]  # the real front of set 2
     assert [b.isbn for b in sets[1].books] == TW_ISBNS[10:20]
 
 
 def test_retakes(tmp_path):
     photos, dec = _stream(tmp_path, [TW_ISBNS[:3]], unreadable={(1, 2)})
-    extra = _photos(tmp_path, ["0003b.jpg"])[0]               # retake of book 2, captioned
+    extra = _photos(tmp_path, ["0003b.jpg"])[0]  # retake of book 2, captioned
     (tmp_path / "0003b.txt").write_text("retake", encoding="utf-8")
-    dup = _photos(tmp_path, ["0004b.jpg"])[0]                 # same barcode as book 3 shot twice
+    dup = _photos(tmp_path, ["0004b.jpg"])[0]  # same barcode as book 3 shot twice
     order = photos[:3] + [extra] + photos[3:] + [dup]
     truth = {extra.name: TW_ISBNS[1], dup.name: TW_ISBNS[2]}
     sets = split_by_count(order, 3, lambda p: truth.get(p.name) or dec(p))
@@ -95,7 +96,7 @@ def test_process_sets_end_to_end(tmp_path):
     cfg.ensure_dirs()
     set_front().save(cfg.inbox / "0001.jpg", quality=92)
     (cfg.inbox / "0001.txt").write_text("good 150 TWD", encoding="utf-8")
-    (cfg.inbox / "0003.txt").write_text("poor 3", encoding="utf-8")         # caption on book 2's back photo
+    (cfg.inbox / "0003.txt").write_text("poor 3", encoding="utf-8")  # caption on book 2's back photo
     for i in range(10):
         img = book_back(TW_ISBNS[i], size=(900, 1200), module=3.0, seed=i)
         if i == 5:  # one unreadable back: blank photo
@@ -112,25 +113,24 @@ def test_process_sets_end_to_end(tmp_path):
     assert len(rows) == 10 and {r["set_id"] for r in rows} == {"S01"}
     assert [r["isbn13"] for r in rows] == [*TW_ISBNS[:5], "", *TW_ISBNS[6:10]]
     assert rows[5]["status"] == "needs_manual" and "isbn13" in rows[5]["errors"]
-    assert rows[0]["status"] == "to_check"                   # complete: waits for your quick check
+    assert rows[0]["status"] == "to_check"  # complete: waits for your quick check
     assert rows[0]["condition"] == "good" and rows[0]["price"] == "150" and rows[0]["currency"] == "TWD"
     assert rows[1]["condition"] == "poor" and rows[1]["price"] == "3" and rows[1]["currency"] == "TWD"
     assert set(store.COLUMNS) >= {"front_photo", "back_photo", "price", "currency"}
     assert not {"description", "front_crop", "back_crop", "barcode_photo", "photo_paths"} & set(store.COLUMNS)
-    assert all(Image.open(r["front_back_photo"]).size == (1500, 1500) for r in rows)   # front + back, square
+    assert all(Image.open(r["front_back_photo"]).size == (1500, 1500) for r in rows)  # front + back, square
     set_dir = cfg.processed / s.batch / "S01"
     assert (set_dir / "front.jpg").exists() and (set_dir / "review.jpg").exists()
     assert sorted(p.name for p in set_dir.iterdir() if p.is_dir()) == [f"{i:02d}" for i in range(1, 11)]
     assert Path(rows[0]["set_photo"]) == set_dir / "front.jpg" and Path(rows[0]["back_photo"]).parent.name == "01"
     assert Path(rows[0]["front_photo"]) == set_dir / "01" / "cover.jpg" and Path(rows[0]["front_photo"]).exists()
     assert (set_dir / "segments.json").exists()
-    assert not list(cfg.inbox.iterdir())                      # nothing left behind
+    assert not list(cfg.inbox.iterdir())  # nothing left behind
     assert len(seen) == 9
 
 
 def test_process_sets_rotation_keeps_original(tmp_path):
-    cfg = Config(data_dir=tmp_path / "data", market_providers=(), set_size=2, grid=(1, 2), settle_seconds=0,
-                 rotate=90)
+    cfg = Config(data_dir=tmp_path / "data", market_providers=(), set_size=2, grid=(1, 2), settle_seconds=0, rotate=90)
     cfg.ensure_dirs()
     set_front(2, (1, 2)).rotate(90, expand=True).save(cfg.inbox / "0001.jpg")
     for i in range(2):
@@ -138,6 +138,7 @@ def test_process_sets_rotation_keeps_original(tmp_path):
     s = process_sets(cfg, lookup=lambda i, c: {"title": "t", "author": "a"})
     set_dir = cfg.processed / s.batch / "S01"
     from PIL import Image
+
     with Image.open(set_dir / "front.jpg") as im:
-        assert im.width > im.height                           # turned upright (landscape)
+        assert im.width > im.height  # turned upright (landscape)
     assert (set_dir / "original" / "0001.jpg").exists()

@@ -7,7 +7,7 @@ Everything you do **once** before using the pipeline, in order - about 30 minute
 1. [Install](#1-install)
 2. [The data folders](#2-the-data-folders)
 3. [Set up the Telegram bot](#3-set-up-the-telegram-bot)
-4. [Free keys for finding more books](#4-free-keys-for-finding-more-books)
+4. [API keys](#4-api-keys)
 5. [Photograph your first set](#5-photograph-your-first-set)
 6. [Get ready to sell on Shopee](#6-get-ready-to-sell-on-shopee)
 7. [Photo links: photos online automatically](#7-photo-links-photos-online-automatically)
@@ -100,15 +100,12 @@ user id into `.env`, and send it a first photo. It ends by sending you back here
 
 ---
 
-## 4. Free keys for finding more books
+## 4. API keys
 
-Put them in `.env`. Everything works without them; you just find fewer books and prices automatically.
-
-| Key | What it adds | How to get it |
-|---|---|---|
-| `GOOGLE_BOOKS_API_KEY` | Google Books as a book source (1,000 look-ups a day) | [Google Cloud Console](https://console.cloud.google.com/): create a project → **APIs & Services → Library** → enable **Books API** → **Credentials → Create credentials → API key**. Then edit the key and under **API restrictions** choose Books API. |
-| `TAVILY_API_KEY` | web search for books the shops' own search can't find (often out of print) | sign up at [tavily.com](https://tavily.com) - 1,000 searches a month, no credit card |
-| `LANGSEARCH_API_KEY` | a second web search, used when Tavily is used up | sign up at [langsearch.com](https://langsearch.com) - free daily allowance |
+Four free keys make the pipeline find much more on its own: **Google Books** (book details), **Tavily** and
+**LangSearch** (web searches for market prices) and **ImgBB** (photos online for Shopee). Each takes a couple of
+minutes; **[API_KEYS.md](API_KEYS.md)** walks through getting every one, where it goes in `.env`, which step of the
+workflow uses it and how to check it works. Everything also runs without them - you just fill in more by hand.
 
 ---
 
@@ -182,21 +179,11 @@ in Seller Center (about a minute), then check and publish there. Everything befo
 
 ## 7. Photo links: photos online automatically
 
-Shopee's bulk upload takes photos only as **web links** (a direct link to a `.jpg`). The pipeline puts them on
-**[ImgBB](https://imgbb.com)**, a free image host with an upload API: every photo gets a permanent direct link
-(`https://i.ibb.co/.../01.jpg`). **Make Shopee upload file** (in Sell products) then puts each product's photos online
-by itself and writes their links into the upload file - no dragging photos into Seller Center. Each photo is uploaded
-once: its link is remembered in `data\listings\photos\<product code>\links.json` and reused until the photo changes.
-
-1. Sign up at [imgbb.com](https://imgbb.com) (free, no card).
-2. Open [api.imgbb.com](https://api.imgbb.com) while signed in → **Get API key** → copy it.
-3. In `.env`: `IMGBB_API_KEY=<your key>`
-
-That's all. The key travels inside the upload request, never in a link. Uploads are kept unless you delete them;
-anyone with a photo's link can see it (as on Shopee itself). Without a key, no links are made and you add the photos
-by hand (**Open its photos** in Sell products).
-
-If a photo can't be put online (no internet, wrong key), the upload file is still made - that product just has no photo
-links, and the result message says why.
+Shopee's bulk upload takes photos only as **web links**. With an ImgBB key in `.env` (`IMGBB_API_KEY` - see
+[API_KEYS.md](API_KEYS.md#4-imgbb-imgbb_api_key)), **Make Shopee upload file** (in Sell products) puts each product's
+photos online on [ImgBB](https://imgbb.com) by itself and writes their links into the upload file - no dragging photos
+into Seller Center. Each photo is uploaded once; its link is remembered in
+`data\listings\photos\<product code>\links.json` and reused until the photo changes. Without a key, no links are made
+and you add the photos by hand (**Open its photos** in Sell products).
 
 Setup done. From now on: **[DAILY_USE.md](DAILY_USE.md)**.

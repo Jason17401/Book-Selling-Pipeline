@@ -14,7 +14,7 @@ def _load_dotenv(path: str = ".env") -> None:
         if not line or line.startswith("#") or "=" not in line:
             continue
         k, v = line.split("=", 1)
-        v = v.split(" #")[0] if " #" in v else v      # allow trailing "  # comment"
+        v = v.split(" #")[0] if " #" in v else v  # allow trailing "  # comment"
         os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
 
 
@@ -30,8 +30,8 @@ def _csv(text: str) -> tuple:
 
 
 ALL_PROVIDERS = ("openlibrary", "openlibrary_search", "google", "eslite", "books_tw", "ncl")
-OLD_DEFAULT_TW = ("google", "ncl", "eslite", "books_tw", "openlibrary")   # BOOK_PROVIDERS_TW of older versions
-REMOVED_PROVIDERS = ("isbndb",)    # no longer supported: quietly left out if an older .env still lists them
+OLD_DEFAULT_TW = ("google", "ncl", "eslite", "books_tw", "openlibrary")  # BOOK_PROVIDERS_TW of older versions
+REMOVED_PROVIDERS = ("isbndb",)  # no longer supported: quietly left out if an older .env still lists them
 
 
 @dataclass
@@ -44,37 +44,48 @@ class Config:
     providers: tuple = ("openlibrary", "openlibrary_search", "google")
     providers_tw: tuple = ("ncl", "eslite", "books_tw", "google", "openlibrary")  # Taiwanese ISBNs (957/986/626):
     # the Chinese sources first - Google often only knows a translated book's English title / author / publisher
-    stop_when: tuple = ("title", "author", "publisher", "year", "genre")  # stop asking more providers once these are filled
-    cache_days: int = 180          # remember what a provider returned for an ISBN (saves your Google quota)
-    cache_miss_days: int = 7       # remember "not found" for this long, then ask again
+    stop_when: tuple = (
+        "title",
+        "author",
+        "publisher",
+        "year",
+        "genre",
+    )  # stop asking more providers once these are filled
+    cache_days: int = 180  # remember what a provider returned for an ISBN (saves your Google quota)
+    cache_miss_days: int = 7  # remember "not found" for this long, then ask again
     google_daily_limit: int = 950  # stop calling Google Books after this many calls per (Pacific-time) day
     google_queries: tuple = ("id", "isbn")  # GOOGLE_STEPS: ways to find the book on Google, tried in order
-    scrape_delay: float = 3.0      # seconds between requests to the same website when scraping (eslite/books_tw/ncl)
-    scrape_user_agent: str = ""    # blank = a normal desktop browser string
+    scrape_delay: float = 3.0  # seconds between requests to the same website when scraping (eslite/books_tw/ncl)
+    scrape_user_agent: str = ""  # blank = a normal desktop browser string
     ncl_base: str = "https://isbn.ncl.edu.tw/NEW_ISBNNet"
-    eslite_details: bool = False   # one extra eslite call per book to get page count and binding
+    eslite_details: bool = False  # one extra eslite call per book to get page count and binding
     min_price: float = 1.0
     max_price: float = 500.0
     grid: tuple = (2, 4)  # rows x cols the books are laid out in on the front photo
-    region: tuple = (0.0, 0.0, 1.0, 1.0)  # left, top, right, bottom of the books as fractions of the photo (ignore blank margins)
-    segment: str = "auto"          # auto = find each book on the front photo; grid = equal cells (the old way)
-    segment_margin: float = 0.04   # table kept around each cut-out book cover, as a fraction of the book's size
+    region: tuple = (
+        0.0,
+        0.0,
+        1.0,
+        1.0,
+    )  # left, top, right, bottom of the books as fractions of the photo (ignore blank margins)
+    segment: str = "auto"  # auto = find each book on the front photo; grid = equal cells (the old way)
+    segment_margin: float = 0.04  # table kept around each cut-out book cover, as a fraction of the book's size
     rotate: int = 0  # degrees CLOCKWISE to turn every photo so it is upright (0/90/180/270); see `orient`
     default_currency: str = "TWD"  # used when a price is given without a currency
     default_condition: str = "as_new"  # condition of a new book unless a caption says otherwise ("" = none)
     # market price of a NEW copy and your price from it (see pipeline/sources/market.py)
     market_providers: tuple = ("barcode", "ncl", "eslite", "books_tw")
     market_search: tuple = ("isbn", "isbn10", "title", "web")
-    web_search: str = ""           # tavily | langsearch: find shop pages with a web search API when the shop's search fails
+    web_search: str = ""  # tavily | langsearch: find shop pages with a web search API when the shop's search fails
     tavily_api_key: str = ""
     langsearch_api_key: str = ""
     web_search_monthly_limit: int = 900
-    web_queries: tuple = ("isbn", "site", "shop")   # "9789574760190" on all shops, "9789574760190 site:eslite.com",
+    web_queries: tuple = ("isbn", "site", "shop")  # "9789574760190" on all shops, "9789574760190 site:eslite.com",
     #                                                then "eslite 9789574760190"
-    market_similar: bool = True    # no copy with this ISBN anywhere: use another edition (same title + author)
-    market_title_pages: int = 3    # books.com.tw: product pages checked per title search
-    auto_price: bool = True        # fill an EMPTY price from the market price
-    price_ratio: float = 0.4       # your price = market price x this
+    market_similar: bool = True  # no copy with this ISBN anywhere: use another edition (same title + author)
+    market_title_pages: int = 3  # books.com.tw: product pages checked per title search
+    auto_price: bool = True  # fill an EMPTY price from the market price
+    price_ratio: float = 0.4  # your price = market price x this
     price_round: str = "TWD:1,*:0.5"  # round your automatic price per currency (0 = cents)
     listing_show_market: bool = True  # show "new: 300 TWD" next to each book in listings
     set_size: int = 8
@@ -83,15 +94,19 @@ class Config:
     bot_timeout: float = 30.0  # seconds the Telegram bot waits for Telegram before retrying (BOT_TIMEOUT)
     settle_seconds: int = 5  # ignore files modified in the last N seconds (still syncing)
     # selling a set (pipeline/apps/products.py) and Shopee (pipeline/apps/shopee.py)
-    set_discount: float = 0.2          # set price = sum of the books' prices minus this fraction (0.2 = 20% off)
-    shopee_template: str = ""          # Shopee's bulk-upload template: a file or a folder (blank = data/listings/shopee/template/)
-    shopee_category_id: str = ""       # 分類代碼 of the category to list in (blank = search the template for shopee_category_name)
+    set_discount: float = 0.2  # set price = sum of the books' prices minus this fraction (0.2 = 20% off)
+    shopee_template: str = (
+        ""  # Shopee's bulk-upload template: a file or a folder (blank = data/listings/shopee/template/)
+    )
+    shopee_category_id: str = (
+        ""  # 分類代碼 of the category to list in (blank = search the template for shopee_category_name)
+    )
     shopee_category_name: str = "其他書籍"
-    shopee_logistics: tuple = ("7-eleven", "全家", "萊爾富", "ok", "蝦皮店到店")   # delivery options switched on
-    shopee_days_to_ship: str = ""      # 較長備貨天數 (blank = Shopee's normal handling time)
+    shopee_logistics: tuple = ("7-eleven", "全家", "萊爾富", "ok", "蝦皮店到店")  # delivery options switched on
+    shopee_days_to_ship: str = ""  # 較長備貨天數 (blank = Shopee's normal handling time)
     shopee_max_images: int = 9
-    shopee_shop_id: str = ""           # your shop's number, to build product links (blank = links only from what you paste)
-    shopee_export_password: str = ""   # password of Shopee's order report (it is protected), to open it automatically
+    shopee_shop_id: str = ""  # your shop's number, to build product links (blank = links only from what you paste)
+    shopee_export_password: str = ""  # password of Shopee's order report (it is protected), to open it automatically
     # photos online on ImgBB, so their links go in the upload file (no key: you add the photos by hand in Seller Center)
     imgbb_api_key: str = ""
 
@@ -107,10 +122,6 @@ class Config:
     @property
     def processed(self) -> Path:
         return Path(self.data_dir) / "processed"
-
-    @property
-    def review(self) -> Path:
-        return Path(self.data_dir) / "needs_review"
 
     @property
     def listings_dir(self) -> Path:
@@ -162,17 +173,23 @@ class Config:
     def cache_dir(self) -> Path:
         return Path(self.data_dir) / "cache"
 
-    def ensure_dirs(self) -> list:
-        """Every data folder, made if missing (so there is nothing to create by hand), and files from older versions
-        brought up to date. Returns what was moved / renamed, to show."""
-        from .store import migrate_old_files
-        for d in (self.inbox, self.processed, self.review, self.listings_dir, self.photos_dir, self.shopee_import,
-                  self.template_dir, self.uploads_dir, self.cache_dir):
+    def ensure_dirs(self) -> None:
+        """Every data folder, made if missing (so there is nothing to create by hand)."""
+        for d in (
+            self.inbox,
+            self.processed,
+            self.listings_dir,
+            self.photos_dir,
+            self.shopee_import,
+            self.template_dir,
+            self.uploads_dir,
+            self.cache_dir,
+        ):
             d.mkdir(parents=True, exist_ok=True)
-        return migrate_old_files(self.data_dir)
 
     def apply_decode_settings(self) -> None:
         from ..photos import decode
+
         decode.configure(self.decoders, self.decode_effort)
 
     @classmethod
@@ -237,22 +254,27 @@ class Config:
             shopee_export_password=e("SHOPEE_EXPORT_PASSWORD", "").strip(),
             imgbb_api_key=e("IMGBB_API_KEY", "").strip(),
         )
-        if cfg.web_queries == ("site", "shop"):           # an older .env's default: today's (the plain ISBN first)
+        if cfg.web_queries == ("site", "shop"):  # an older .env's default: today's (the plain ISBN first)
             cfg.web_queries = cls.web_queries
-        if cfg.providers_tw == OLD_DEFAULT_TW:          # an older .env's default order: today's default instead
+        if cfg.providers_tw == OLD_DEFAULT_TW:  # an older .env's default order: today's default instead
             cfg.providers_tw = cls.providers_tw
         cfg.providers = tuple(p for p in cfg.providers if p not in REMOVED_PROVIDERS)
         cfg.providers_tw = tuple(p for p in cfg.providers_tw if p not in REMOVED_PROVIDERS)
         unknown = [p for p in cfg.providers + cfg.providers_tw if p not in ALL_PROVIDERS]
         if unknown:
-            raise SystemExit(f"Unknown book provider(s) in .env: {', '.join(unknown)}. Known: {', '.join(ALL_PROVIDERS)}")
+            raise SystemExit(
+                f"Unknown book provider(s) in .env: {', '.join(unknown)}. Known: {', '.join(ALL_PROVIDERS)}"
+            )
         from .validate import CONDITIONS, OLD_CONDITIONS
+
         cfg.default_condition = OLD_CONDITIONS.get(cfg.default_condition, cfg.default_condition)
         if cfg.default_condition and cfg.default_condition not in CONDITIONS:
             raise SystemExit(f"DEFAULT_CONDITION must be one of {', '.join(CONDITIONS)} (or blank)")
         bad_m = [m for m in cfg.market_providers if m not in ("barcode", "eslite", "books_tw", "ncl")]
         if bad_m:
-            raise SystemExit(f"MARKET_PROVIDERS: unknown {', '.join(bad_m)}. Use any of: barcode, eslite, books_tw, ncl")
+            raise SystemExit(
+                f"MARKET_PROVIDERS: unknown {', '.join(bad_m)}. Use any of: barcode, eslite, books_tw, ncl"
+            )
         bad_q = [q for q in cfg.google_queries if q not in ("id", "isbn", "isbn10", "plain")]
         if bad_q:
             raise SystemExit(f"GOOGLE_STEPS: unknown {', '.join(bad_q)}. Use any of: id, isbn, isbn10, plain")
